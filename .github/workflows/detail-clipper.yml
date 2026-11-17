@@ -1,14 +1,21 @@
-# Builds the Detail Clipper plug-in (projects/DetailClipper) for Windows and macOS.
-# The built plug-ins are attached to the workflow run as downloadable artifacts.
+# Builds the Detail Clipper plug-in (projects/DetailClipper).
+#
+# - Every push that touches the plug-in builds the Windows x64 package
+#   (VST3 + standalone app + Install.txt) and attaches it to the run.
+# - Pushing a tag named detail-clipper-v<version> also publishes that package
+#   as a GitHub Release, which is what the web demo's download button links to.
+# - The macOS build runs only when the workflow is started by hand.
 
 name: Detail Clipper
 
 on:
   push:
+    branches: ["**"]
     paths:
       - "projects/DetailClipper/**"
       - "projects/shared/cicada_ui/**"
       - ".github/workflows/detail-clipper.yml"
+    tags: ["detail-clipper-v*"]
   workflow_dispatch:
 
 jobs:
@@ -23,16 +30,65 @@ jobs:
       - name: Build VST3 and Standalone
         run: cmake --build build --config Release --target DetailClipper_VST3 DetailClipper_Standalone --parallel
 
+      - name: Package
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path projects/DetailClipper/CMakeLists.txt -Pattern 'project\(DETAIL_CLIPPER VERSION ([0-9.]+)\)').Matches[0].Groups[1].Value
+          $out = "Detail Clipper $v (Windows x64)"
+          $rel = "build/DetailClipper_artefacts/Release"
+          New-Item -ItemType Directory -Path "dist/$out" | Out-Null
+          Copy-Item -Recurse "$rel/VST3/Detail Clipper.vst3" "dist/$out/"
+          Copy-Item "$rel/Standalone/Detail Clipper.exe" "dist/$out/"
+          @(
+            "Detail Clipper $v - Windows x64",
+            "",
+            "INSTALL THE PLUG-IN",
+            "1. Copy the whole 'Detail Clipper.vst3' folder into:",
+            "   C:\Program Files\Common Files\VST3",
+            "2. Rescan plug-ins in your DAW. It is listed under the maker 'Cicada', in Fx / Distortion.",
+            "",
+            "TRY IT WITHOUT A DAW",
+            "Run 'Detail Clipper.exe'. Pick your audio device in Options > Audio/MIDI Settings.",
+            "Windows may warn because the app is unsigned: choose More info > Run anyway.",
+            "",
+            "Detail Clipper is built with JUCE (AGPLv3 / commercial licence).",
+            "Source: https://github.com/${{ github.repository }}/tree/${{ github.sha }}/projects/DetailClipper"
+          ) | Set-Content -Encoding utf8 "dist/$out/Install.txt"
+          Compress-Archive -Path "dist/$out" -DestinationPath "dist/DetailClipper-$v-Windows-x64.zip"
+
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: DetailClipper-Windows-x64
-          path: |
-            build/DetailClipper_artefacts/Release/VST3/
-            build/DetailClipper_artefacts/Release/Standalone/
+          path: dist/*.zip
           if-no-files-found: error
 
+  release:
+    if: startsWith(github.ref, 'refs/tags/detail-clipper-v')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: DetailClipper-Windows-x64
+          path: dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Detail Clipper ${{ github.ref_name }}
+          files: dist/*.zip
+          body: |
+            Detail Clipper, a hard clipper that keeps the detail, in the Cicada look.
+
+            **Windows x64:** download the zip below, unzip it and copy `Detail Clipper.vst3` into `C:\Program Files\Common Files\VST3`, then rescan plug-ins in your DAW. `Detail Clipper.exe` runs it without a DAW.
+
+            Source: [`projects/DetailClipper`](https://github.com/${{ github.repository }}/tree/${{ github.sha }}/projects/DetailClipper). Built with JUCE (AGPLv3 / commercial licence).
+
   macos:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
