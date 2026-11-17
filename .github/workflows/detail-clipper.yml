@@ -1,0 +1,59 @@
+# Builds the Detail Clipper plug-in (projects/DetailClipper) for Windows and macOS.
+# The built plug-ins are attached to the workflow run as downloadable artifacts.
+
+name: Detail Clipper
+
+on:
+  push:
+    paths:
+      - "projects/DetailClipper/**"
+      - "projects/shared/cicada_ui/**"
+      - ".github/workflows/detail-clipper.yml"
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S projects/DetailClipper -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build VST3 and Standalone
+        run: cmake --build build --config Release --target DetailClipper_VST3 DetailClipper_Standalone --parallel
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: DetailClipper-Windows-x64
+          path: |
+            build/DetailClipper_artefacts/Release/VST3/
+            build/DetailClipper_artefacts/Release/Standalone/
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S projects/DetailClipper -B build -G Xcode -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13
+
+      - name: Build VST3, AU and Standalone
+        run: cmake --build build --config Release --target DetailClipper_VST3 DetailClipper_AU DetailClipper_Standalone -- -quiet
+
+      - name: Ad-hoc sign and zip
+        run: |
+          cd build/DetailClipper_artefacts/Release
+          for b in "VST3/Detail Clipper.vst3" "AU/Detail Clipper.component" "Standalone/Detail Clipper.app"; do codesign --force --deep -s - "$b"; done
+          ditto -c -k --keepParent "VST3/Detail Clipper.vst3" DetailClipper-VST3.zip
+          ditto -c -k --keepParent "AU/Detail Clipper.component" DetailClipper-AU.zip
+          ditto -c -k --keepParent "Standalone/Detail Clipper.app" DetailClipper-Standalone.zip
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: DetailClipper-macOS-universal
+          path: build/DetailClipper_artefacts/Release/*.zip
+          if-no-files-found: error
