@@ -11,7 +11,7 @@ first one with its own spectrum.
 ## How it works
 
 1. **Analysis** (background thread, on drop): the file is decoded, mixed to mono,
-   resampled to 48 kHz and normalised. A 2048-point Hann STFT with 75 % overlap
+   resampled to 48 kHz and its peak level measured. A 2048-point Hann STFT with 75 % overlap
    measures each bin's magnitude and its instantaneous frequency (from the
    phase difference between frames). The result is shown as a log-frequency
    spectrogram.
@@ -34,6 +34,15 @@ first one with its own spectrum.
 To load a sample, drag an audio file (WAV/AIFF/FLAC/OGG/MP3, up to 60 s) onto
 a spectrogram or click it to browse. Right-click a spectrogram to clear it.
 File paths are saved with the session.
+
+Each sample keeps its original level. **Normalize** (on each sample) raises or
+lowers it so its peak sits at 0 dB, and **Swap A <> B** exchanges the two
+samples; the Normalize setting moves with its sample.
+
+To reset, double-click a knob to return just that knob to its default. Every
+section has a **Reset** button for that section, and **Reset All** in the
+header resets every knob, switch and menu. The samples and their Normalize
+settings are not affected.
 
 ## Building
 

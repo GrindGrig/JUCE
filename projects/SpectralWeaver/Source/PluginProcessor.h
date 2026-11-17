@@ -48,6 +48,17 @@ public:
     void loadSample (int slot, const juce::File& file);
     void clearSample (int slot);
 
+    /** Exchanges the A and B samples, together with their Normalize switches. */
+    void swapSamples();
+
+    /** Returns every parameter in a group ("playback", "cross", "spectral", "lfo", "amp") to its default. */
+    void resetGroup (const juce::String& groupId);
+
+    /** Resets every adjustable control (sample Normalize switches are left alone). */
+    void resetAll();
+
+    static juce::String normaliseParamId (int slot) { return slot == slotA ? "normA" : "normB"; }
+
     sw::SpectralImage::Ptr getImage (int slot) const;
     juce::String getStatus (int slot) const;
     bool isLoading (int slot) const noexcept { return loading[(size_t) slot].load(); }

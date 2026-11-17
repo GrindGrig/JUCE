@@ -39,6 +39,7 @@ struct SpectralImage final : public juce::ReferenceCountedObject
     std::vector<float> frequencies;  // numFrames * numBins, instantaneous frequency in Hz
     std::vector<float> frameMax;     // loudest bin of each frame
     float              peak = 0.0f;  // loudest bin of the whole image
+    float              samplePeak = 1.0f; // absolute sample peak of the decoded audio (1.0 = 0 dBFS)
 
     juce::Image picture;             // log-frequency spectrogram for display
 

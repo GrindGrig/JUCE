@@ -163,7 +163,7 @@ SpectralImage::Ptr analyseFile (const juce::File& file, juce::AudioFormatManager
         return nullptr;
     }
 
-    // Normalise so quiet samples resynthesise at a usable level
+    // Measure the peak; the level is kept as-is and Normalize rescales it at play time
     const auto range = juce::FloatVectorOperations::findMinAndMax (resampled.data(), (int) resampled.size());
     const float absPeak = juce::jmax (std::abs (range.getStart()), std::abs (range.getEnd()));
 
@@ -173,9 +173,8 @@ SpectralImage::Ptr analyseFile (const juce::File& file, juce::AudioFormatManager
         return nullptr;
     }
 
-    juce::FloatVectorOperations::multiply (resampled.data(), 0.89f / absPeak, (int) resampled.size());
-
     auto image = analyseSamples (resampled.data(), (int) resampled.size());
+    image->samplePeak = absPeak;
     image->file = file;
     image->name = file.getFileName();
     return image;

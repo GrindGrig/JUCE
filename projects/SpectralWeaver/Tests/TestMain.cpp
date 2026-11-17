@@ -207,6 +207,14 @@ int main (int argc, char** argv)
         check (std::abs (r.rms / expected - 1.0f) < 0.1f, "resynthesis level = " + juce::String (r.rms, 4) + " rms (expected " + juce::String (expected, 4) + ")");
     }
 
+    // 2b. Normalize gain scales the output linearly
+    {
+        auto p = rp;
+        p.levelA = 2.0f;
+        const auto r = render (p, 48000.0, 60, 1.0);
+        check (std::abs (r.rms / (0.5f / std::sqrt (2.0f)) - 2.0f) < 0.2f, "level gain x2 = " + juce::String (r.rms, 4) + " rms (expected ~0.707)");
+    }
+
     // 3. Key tracking: one octave up, and a different host sample rate
     {
         const auto r = render (rp, 44100.0, 72, 1.0);

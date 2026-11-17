@@ -24,6 +24,7 @@ struct RenderParams
 {
     const SpectralImage* imageA = nullptr;
     const SpectralImage* imageB = nullptr;
+    float levelA = 1.0f, levelB = 1.0f; // linear gains applied to each image (Normalize)
 
     // Playback
     float start = 0.0f, length = 1.0f, speed = 1.0f;
@@ -83,7 +84,7 @@ public:
 private:
     void synthesiseHop();
     void advancePlayheads (const SpectralImage& a, const SpectralImage* b);
-    void readFrame (const SpectralImage& image, float position, float* magsOut, float* freqsOut) const;
+    void readFrame (const SpectralImage& image, float position, float gain, float* magsOut, float* freqsOut) const;
     void applyCrossModulation (const SpectralImage& b);
     void applySculpting();
     void remapAndSynthesise();

@@ -92,6 +92,18 @@ void LookAndFeel::drawComboBox (juce::Graphics& g, int w, int h, bool, int, int,
     g.fillPath (arrow);
 }
 
+void LookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool highlighted, bool down)
+{
+    const auto r = b.getLocalBounds().toFloat().reduced (0.5f);
+    const auto accent = b.findColour (juce::TextButton::buttonOnColourId);
+    g.setColour (down ? accent.withAlpha (0.3f) : (highlighted ? colours::panel.brighter (0.15f) : colours::background));
+    g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
+    g.setColour (highlighted || down ? accent : colours::outline);
+    g.drawRoundedRectangle (r, r.getHeight() * 0.5f, 1.1f);
+}
+
+juce::Font LookAndFeel::getTextButtonFont (juce::TextButton&, int) { return juce::FontOptions (11.5f, juce::Font::bold); }
+
 juce::Font LookAndFeel::getComboBoxFont (juce::ComboBox&) { return juce::FontOptions (13.0f); }
 juce::Font LookAndFeel::getLabelFont (juce::Label& l)     { return l.getFont(); }
 
@@ -161,9 +173,18 @@ Toggle::Toggle (juce::AudioProcessorValueTreeState& state, const juce::String& p
 
 //==============================================================================
 SpectrogramView::SpectrogramView (SpectralWeaverProcessor& p, int s, juce::String t, juce::Colour a)
-    : processor (p), slot (s), title (std::move (t)), accent (a)
+    : processor (p), slot (s), title (std::move (t)), accent (a),
+      normalise (p.parameters, SpectralWeaverProcessor::normaliseParamId (s), "NORMALIZE", a)
 {
     lastPositions.fill (-1.0f);
+
+    normalise.setTooltip ("Raise or lower this sample so its peak sits at 0 dB");
+    swap.setTooltip ("Exchange the A and B samples");
+    swap.setColour (juce::TextButton::buttonOnColourId, a);
+    swap.setColour (juce::TextButton::textColourOffId, colours::dim);
+    swap.onClick = [this] { processor.swapSamples(); };
+    addAndMakeVisible (normalise);
+    addAndMakeVisible (swap);
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
     refresh();
     startTimerHz (30);
@@ -172,7 +193,19 @@ SpectrogramView::SpectrogramView (SpectralWeaverProcessor& p, int s, juce::Strin
 void SpectrogramView::refresh()
 {
     image = processor.getImage (slot);
+    normalise.setEnabled (image != nullptr);
     repaint();
+}
+
+void SpectrogramView::resized()
+{
+    auto header = getLocalBounds().reduced (12, 6).removeFromTop (20);
+    header.removeFromLeft (140);
+    normalise.setBounds (header.removeFromLeft (96));
+    header.removeFromLeft (6);
+    swap.setBounds (header.removeFromLeft (104));
+    header.removeFromLeft (10);
+    statusArea = header.toFloat();
 }
 
 juce::Rectangle<float> SpectrogramView::imageArea() const
@@ -195,8 +228,8 @@ void SpectrogramView::timerCallback()
         }
     }
 
-    if (changed || processor.isLoading (slot) || slot == SpectralWeaverProcessor::slotA)
-        repaint();
+    juce::ignoreUnused (changed);
+    repaint(); // cheap, and keeps region, freeze and normalize state current
 }
 
 void SpectrogramView::paint (juce::Graphics& g)
@@ -214,7 +247,17 @@ void SpectrogramView::paint (juce::Graphics& g)
     g.drawText (title, header, juce::Justification::centredLeft);
     g.setColour (colours::dim);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText (processor.getStatus (slot), header, juce::Justification::centredRight, true);
+
+    auto statusText = processor.getStatus (slot);
+
+    if (statusText.isEmpty() && image != nullptr)
+    {
+        const bool normalised = processor.parameters.getRawParameterValue (SpectralWeaverProcessor::normaliseParamId (slot))->load() > 0.5f;
+        const float db = normalised ? 0.0f : juce::Decibels::gainToDecibels (image->samplePeak);
+        statusText = image->name + juce::String::formatted ("  |  %.2fs  |  peak %+.1f dB", image->lengthSeconds, db);
+    }
+
+    g.drawText (statusText, statusArea, juce::Justification::centredRight, true);
 
     const auto area = imageArea();
 
@@ -416,6 +459,23 @@ SpectralWeaverEditor::SpectralWeaverEditor (SpectralWeaverProcessor& p)
     keyboard.setColour (juce::MidiKeyboardComponent::keyDownOverlayColourId, accentA.withAlpha (0.6f));
     keyboard.setColour (juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, accentA.withAlpha (0.25f));
 
+    for (size_t i = 0; i < resetButtons.size(); ++i)
+    {
+        auto& b = resetButtons[i];
+        b.setButtonText ("RESET");
+        b.setTooltip ("Reset this section to its defaults");
+        b.setColour (juce::TextButton::buttonOnColourId, accentFx);
+        b.setColour (juce::TextButton::textColourOffId, dim);
+        b.onClick = [this, id = juce::String (resetGroupIds[i])] { processor.resetGroup (id); };
+        addAndMakeVisible (b);
+    }
+
+    resetAllButton.setTooltip ("Reset every knob, switch and menu to its default (samples stay loaded)");
+    resetAllButton.setColour (juce::TextButton::buttonOnColourId, accentA);
+    resetAllButton.setColour (juce::TextButton::textColourOffId, text);
+    resetAllButton.onClick = [this] { processor.resetAll(); };
+    addAndMakeVisible (resetAllButton);
+
     processor.addChangeListener (this);
     setSize (1240, 728);
 }
@@ -456,7 +516,7 @@ void SpectralWeaverEditor::paint (juce::Graphics& g)
     g.setFont (juce::FontOptions (12.5f));
     g.drawText ("spectral resynthesis  /  cross-synthesis instrument", header.withTrimmedLeft (230), juce::Justification::centredLeft);
     g.drawText ("drop a sample on A  -  play MIDI  -  drop a second sample on B to modulate A",
-                header, juce::Justification::centredRight);
+                header.withTrimmedRight (124), juce::Justification::centredRight);
 
     paintPanel (g, playbackPanel, "PLAYBACK  /  SCAN", accentA);
     paintPanel (g, crossPanel,    "B  ->  A  CROSS MODULATION", accentB);
@@ -533,6 +593,15 @@ void SpectralWeaverEditor::resized()
     ampPanel = bottom.removeFromRight (330);
     bottom.removeFromRight (10);
     lfoPanel = bottom;
+
+    {
+        const juce::Rectangle<int>* panels[] { &playbackPanel, &crossPanel, &spectralPanel, &lfoPanel, &ampPanel };
+
+        for (size_t i = 0; i < resetButtons.size(); ++i)
+            resetButtons[i].setBounds (panels[i]->getRight() - 12 - 62, panels[i]->getY() + 7, 62, 20);
+
+        resetAllButton.setBounds (getWidth() - 18 - 110, 11, 110, 26);
+    }
 
     layoutRow (spectralPanel.reduced (10).withTrimmedTop (24).withSizeKeepingCentre (spectralPanel.getWidth() - 20, 92), spectralKnobs);
     layoutRow (ampPanel.reduced (10).withTrimmedTop (24).withSizeKeepingCentre (ampPanel.getWidth() - 20, 92), ampKnobs);

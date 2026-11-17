@@ -152,7 +152,7 @@ void SpectralVoice::synthesiseHop()
     const auto& a = *p.imageA;
     const auto* b = p.imageB;
 
-    readFrame (a, posA, magA.data(), freqA.data());
+    readFrame (a, posA, p.levelA, magA.data(), freqA.data());
 
     // Temporal blur: one-pole smoothing of the magnitude image over time
     if (firstHop || p.blur <= 0.0f)
@@ -171,7 +171,7 @@ void SpectralVoice::synthesiseHop()
 
     if (b != nullptr && p.crossAmount > 0.0f)
     {
-        readFrame (*b, posB, magB.data(), freqB.data());
+        readFrame (*b, posB, p.levelB, magB.data(), freqB.data());
         applyCrossModulation (*b);
     }
 
@@ -187,7 +187,7 @@ void SpectralVoice::synthesiseHop()
         adsr.noteOff();
 }
 
-void SpectralVoice::readFrame (const SpectralImage& image, float position, float* magsOut, float* freqsOut) const
+void SpectralVoice::readFrame (const SpectralImage& image, float position, float gain, float* magsOut, float* freqsOut) const
 {
     const int   last = image.numFrames - 1;
     const float pos  = juce::jlimit (0.0f, (float) last, position);
@@ -199,7 +199,7 @@ void SpectralVoice::readFrame (const SpectralImage& image, float position, float
     const float* m1 = image.mag (i1);
 
     for (int k = 0; k < nb; ++k)
-        magsOut[k] = m0[k] + t * (m1[k] - m0[k]);
+        magsOut[k] = (m0[k] + t * (m1[k] - m0[k])) * gain;
 
     const float* f = image.freq (t < 0.5f ? i0 : i1);
     std::copy (f, f + nb, freqsOut);
@@ -276,7 +276,7 @@ void SpectralVoice::applyCrossModulation (const SpectralImage& b)
 {
     const auto& p   = *params;
     const float amt = juce::jlimit (0.0f, 1.0f, p.crossAmount);
-    const float ref = juce::jmax (params->imageA->peak, b.peak, 1.0e-9f);
+    const float ref = juce::jmax (params->imageA->peak * p.levelA, b.peak * p.levelB, 1.0e-9f);
     const float eps = ref * 1.0e-4f;
 
     switch (p.crossMode)

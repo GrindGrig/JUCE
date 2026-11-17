@@ -25,6 +25,8 @@ namespace ui
                                float startAngle, float endAngle, juce::Slider&) override;
         void drawToggleButton (juce::Graphics&, juce::ToggleButton&, bool highlighted, bool down) override;
         void drawComboBox (juce::Graphics&, int w, int h, bool down, int bx, int by, int bw, int bh, juce::ComboBox&) override;
+        void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool highlighted, bool down) override;
+        juce::Font getTextButtonFont (juce::TextButton&, int) override;
         juce::Font getComboBoxFont (juce::ComboBox&) override;
         juce::Font getLabelFont (juce::Label&) override;
     };
@@ -66,6 +68,7 @@ namespace ui
                 const juce::String& caption, juce::Colour accent);
 
         void resized() override { button.setBounds (getLocalBounds()); }
+        void setTooltip (const juce::String& t) { button.setTooltip (t); }
 
     private:
         juce::ToggleButton button;
@@ -81,6 +84,7 @@ namespace ui
         SpectrogramView (SpectralWeaverProcessor&, int slot, juce::String title, juce::Colour accent);
 
         void paint (juce::Graphics&) override;
+        void resized() override;
         void mouseDown (const juce::MouseEvent&) override;
 
         bool isInterestedInFileDrag (const juce::StringArray& files) override;
@@ -99,6 +103,10 @@ namespace ui
         const int slot;
         const juce::String title;
         const juce::Colour accent;
+
+        Toggle normalise;
+        juce::TextButton swap { "SWAP A <> B" };
+        juce::Rectangle<float> statusArea;
 
         sw::SpectralImage::Ptr image;
         std::unique_ptr<juce::FileChooser> chooser;
@@ -141,6 +149,12 @@ private:
     ui::Toggle freeze, loop, keyTrack, syncB;
     ui::Choice crossMode, lfoShape, lfoTarget;
     juce::MidiKeyboardComponent keyboard;
+
+    // Section reset buttons, in the same order as SpectralWeaverProcessor's parameter groups
+    static constexpr const char* resetGroupIds[] { "playback", "cross", "spectral", "lfo", "amp" };
+    std::array<juce::TextButton, 5> resetButtons;
+    juce::TextButton resetAllButton { "RESET ALL" };
+    juce::TooltipWindow tooltips { this, 600 };
 
     juce::Rectangle<int> playbackPanel, crossPanel, spectralPanel, lfoPanel, ampPanel;
 

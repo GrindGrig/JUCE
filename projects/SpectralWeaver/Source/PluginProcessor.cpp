@@ -27,7 +27,9 @@ namespace
                                         "blur", "smear", "tonal", "tilt", "gate", "warp", "shift", "phaseRand",
                                         "crossMode", "crossAmount", "envWidth", "syncB", "speedB",
                                         "attack", "decay", "sustain", "release", "gain",
-                                        "lfoRate", "lfoDepth", "lfoShape", "lfoTarget" };
+                                        "lfoRate", "lfoDepth", "lfoShape", "lfoTarget", "normA", "normB" };
+
+    const char* const resettableGroups[] = { "playback", "cross", "spectral", "lfo", "amp" };
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout SpectralWeaverProcessor::createLayout()
@@ -75,7 +77,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout SpectralWeaverProcessor::cre
                    std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "lfoShape", 1 }, "LFO Shape", lfoShapeNames(), 0),
                    std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "lfoTarget", 1 }, "LFO Target", lfoTargetNames(), 0));
 
-    layout.add (std::move (playback), std::move (spectral), std::move (cross), std::move (amp), std::move (lfo));
+    auto samples = std::make_unique<juce::AudioProcessorParameterGroup> ("samples", "Samples", "|");
+    samples->addChild (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "normA", 1 }, "Normalize A", false),
+                       std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "normB", 1 }, "Normalize B", false));
+
+    layout.add (std::move (playback), std::move (spectral), std::move (cross), std::move (amp), std::move (lfo), std::move (samples));
     return layout;
 }
 
@@ -183,6 +189,8 @@ void SpectralWeaverProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     auto& rp = renderParams;
     rp.imageA = audioImages[slotA].get();
     rp.imageB = audioImages[slotB].get();
+    rp.levelA = (rp.imageA != nullptr && param ("normA") > 0.5f) ? 1.0f / rp.imageA->samplePeak : 1.0f;
+    rp.levelB = (rp.imageB != nullptr && param ("normB") > 0.5f) ? 1.0f / rp.imageB->samplePeak : 1.0f;
 
     rp.start          = param ("start");
     rp.length         = param ("length");
@@ -268,7 +276,7 @@ void SpectralWeaverProcessor::loadSample (int slot, const juce::File& file)
             return; // superseded by a newer request
 
         if (image != nullptr)
-            installImage (slot, image, image->name + juce::String::formatted ("  |  %.2fs  |  %d frames", image->lengthSeconds, image->numFrames));
+            installImage (slot, image, {}); // empty status: the editor describes the image itself
         else
             installImage (slot, getImage (slot), error);
     });
@@ -278,6 +286,66 @@ void SpectralWeaverProcessor::clearSample (int slot)
 {
     ++generation[(size_t) slot];
     installImage (slot, nullptr, "Drop a sample here");
+}
+
+void SpectralWeaverProcessor::swapSamples()
+{
+    // Cancel half-finished loads: they would land in the wrong slot
+    ++generation[slotA];
+    ++generation[slotB];
+
+    {
+        const juce::SpinLock::ScopedLockType lock (imageLock);
+        std::swap (images[slotA], images[slotB]);
+    }
+
+    {
+        const juce::ScopedLock sl (statusLock);
+        std::swap (status[slotA], status[slotB]);
+
+        for (auto& s : status)
+            if (s.startsWith ("Analysing"))
+                s = "Load cancelled by swap";
+    }
+
+    loading[slotA] = false;
+    loading[slotB] = false;
+
+    // Normalize belongs to the sample, so it travels with it
+    auto* normA = parameters.getParameter ("normA");
+    auto* normB = parameters.getParameter ("normB");
+    const float a = normA->getValue(), b = normB->getValue();
+
+    for (auto [param, value] : { std::pair { normA, b }, std::pair { normB, a } })
+    {
+        param->beginChangeGesture();
+        param->setValueNotifyingHost (value);
+        param->endChangeGesture();
+    }
+
+    sendChangeMessage();
+}
+
+void SpectralWeaverProcessor::resetGroup (const juce::String& groupId)
+{
+    for (const auto* group : getParameterTree().getSubgroups (false))
+    {
+        if (group->getID() != groupId)
+            continue;
+
+        for (auto* param : group->getParameters (true))
+        {
+            param->beginChangeGesture();
+            param->setValueNotifyingHost (param->getDefaultValue());
+            param->endChangeGesture();
+        }
+    }
+}
+
+void SpectralWeaverProcessor::resetAll()
+{
+    for (auto* id : resettableGroups)
+        resetGroup (id);
 }
 
 void SpectralWeaverProcessor::installImage (int slot, sw::SpectralImage::Ptr image, const juce::String& newStatus)
