@@ -2,9 +2,11 @@
 #
 # - Every push that touches the plug-in builds the Windows x64 package
 #   (VST3 + standalone app + Install.txt) and attaches it to the run.
-# - Pushing a tag named detail-clipper-v<version> also publishes that package
-#   as a GitHub Release, which is what the web demo's download button links to.
-# - The macOS build runs only when the workflow is started by hand.
+# - Pushing a tag named detail-clipper-v<version>, or starting the workflow by
+#   hand with "release" ticked, also publishes that package as the GitHub
+#   Release detail-clipper-v<version> (the version comes from CMakeLists.txt).
+#   The web demo's download button links to it.
+# - The macOS build runs only when started by hand with "macos" ticked.
 
 name: Detail Clipper
 
@@ -17,10 +19,21 @@ on:
       - ".github/workflows/detail-clipper.yml"
     tags: ["detail-clipper-v*"]
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish the Windows package as a GitHub Release"
+        type: boolean
+        default: false
+      macos:
+        description: "Also build for macOS"
+        type: boolean
+        default: false
 
 jobs:
   windows:
     runs-on: windows-2022
+    outputs:
+      version: ${{ steps.package.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -31,9 +44,11 @@ jobs:
         run: cmake --build build --config Release --target DetailClipper_VST3 DetailClipper_Standalone --parallel
 
       - name: Package
+        id: package
         shell: pwsh
         run: |
           $v = (Select-String -Path projects/DetailClipper/CMakeLists.txt -Pattern 'project\(DETAIL_CLIPPER VERSION ([0-9.]+)\)').Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
           $out = "Detail Clipper $v (Windows x64)"
           $rel = "build/DetailClipper_artefacts/Release"
           New-Item -ItemType Directory -Path "dist/$out" | Out-Null
@@ -64,7 +79,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/detail-clipper-v')
+    if: startsWith(github.ref, 'refs/tags/detail-clipper-v') || (github.event_name == 'workflow_dispatch' && inputs.release)
     needs: windows
     runs-on: ubuntu-latest
     permissions:
@@ -78,7 +93,10 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          name: Detail Clipper ${{ github.ref_name }}
+          tag_name: detail-clipper-v${{ needs.windows.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: Detail Clipper ${{ needs.windows.outputs.version }}
+          make_latest: true
           files: dist/*.zip
           body: |
             Detail Clipper, a hard clipper that keeps the detail, in the Cicada look.
@@ -88,7 +106,7 @@ jobs:
             Source: [`projects/DetailClipper`](https://github.com/${{ github.repository }}/tree/${{ github.sha }}/projects/DetailClipper). Built with JUCE (AGPLv3 / commercial licence).
 
   macos:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.macos
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4

@@ -36,13 +36,14 @@ The `Detail Clipper` GitHub Actions workflow builds a Windows x64 package
 (VST3, standalone app and Install.txt) on every push that touches this folder
 or `cicada_ui`, and attaches it to the run.
 
-To publish a download for everyone, bump the version in `CMakeLists.txt` and
-push a matching tag, for example `detail-clipper-v1.0.0`. The workflow then
-creates a GitHub Release with the zip attached; the web demo's download button
-links to it.
+To publish a download for everyone, bump the version in `CMakeLists.txt`, then
+either push a matching tag (for example `detail-clipper-v1.0.0`) or start the
+workflow from the Actions tab with **release** ticked. The workflow creates
+the GitHub Release `detail-clipper-v<version>` with the zip attached; the web
+demo's download button links to it.
 
 The macOS build (VST3, AU, Standalone, universal) runs only when the workflow
-is started by hand from the Actions tab. It is only ad-hoc signed: on another
+is started by hand from the Actions tab with **macos** ticked. It is only ad-hoc signed: on another
 Mac, right-click it and choose Open, or clear the quarantine flag.
 
 The DSP is shared with the single-file example
