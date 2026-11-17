@@ -2,6 +2,7 @@
 // -DSPECTRAL_WEAVER_BUILD_TESTS=ON and run SpectralWeaverTests.
 
 #include "SpectralVoice.h"
+#include "Modulation.h"
 #include <cstdio>
 
 namespace
@@ -161,6 +162,21 @@ namespace
         xml.setAttribute ("fileA", a.getFullPathName());
         xml.setAttribute ("fileB", b.getFullPathName());
 
+        // Example modulation so the editor shows routed knobs
+        auto* routes = xml.createNewChildElement ("ROUTES");
+        for (auto [lfo, target] : { std::pair { 0, "tilt" }, std::pair { 0, "start" }, std::pair { 1, "tilt" }, std::pair { 1, "warp" } })
+        {
+            auto* r = routes->createNewChildElement ("ROUTE");
+            r->setAttribute ("lfo", lfo);
+            r->setAttribute ("target", target);
+            auto* param = xml.createNewChildElement ("PARAM");
+            param->setAttribute ("id", sw::modDepthId (lfo, target));
+            param->setAttribute ("value", lfo == 0 && juce::String (target) == "start" ? -0.3 : 0.5);
+        }
+        auto* shape = xml.createNewChildElement ("PARAM");
+        shape->setAttribute ("id", "lfo2Shape");
+        shape->setAttribute ("value", 7);
+
         juce::MemoryBlock state;
         {
             juce::MemoryOutputStream out (state, false);
@@ -257,6 +273,44 @@ int main (int argc, char** argv)
         p.crossMode = sw::CrossMode::morph;
         const auto r = render (p, 48000.0, 60, 1.0);
         check (std::abs (r.freq - 110.0f) < 15.0f, "morph at 100% follows B's pitch: " + juce::String (r.freq, 1) + " Hz (expected ~110)");
+    }
+
+    // 6. LFO engine
+    {
+        sw::CustomShapeTable table;
+        sw::Lfo lfo;
+        sw::Lfo::Settings st;
+        st.rateHz = 1.0;
+        float peakOut = -2.0f, minOut = 2.0f, at25 = 0.0f;
+
+        for (int k = 0; k < 100; ++k) // 100 chunks of 10 ms = one cycle
+        {
+            const float v = lfo.process (st, 480, 48000.0, table, 10.0, std::nullopt);
+            if (k == 25) at25 = v;
+            peakOut = juce::jmax (peakOut, v); minOut = juce::jmin (minOut, v);
+        }
+
+        check (std::abs (at25 - 1.0f) < 0.01f && peakOut <= 1.0f && minOut >= -1.0f, "LFO sine quarter cycle = " + juce::String (at25, 3) + " (expected 1)");
+
+        st.unipolar = true; st.shape = sw::square;
+        lfo.reset();
+        const float uniHigh = lfo.process (st, 480, 48000.0, table, 10.0, std::nullopt);
+        check (std::abs (uniHigh - 1.0f) < 1.0e-4f, "LFO unipolar square starts at 1");
+
+        st.unipolar = false; st.shape = sw::sine; st.fadeSeconds = 1.0f;
+        const float faded = lfo.process (st, 1, 48000.0, table, 0.5, 0.25); // locked to a quarter cycle, half faded
+        check (std::abs (faded - 0.5f) < 0.01f, "LFO host-locked phase + fade-in = " + juce::String (faded, 3) + " (expected 0.5)");
+
+        const sw::ShapePoints pts { { 0.0f, -1.0f }, { 0.5f, 1.0f } };
+        table.setPoints (pts);
+        st = {}; st.shape = sw::custom; st.phaseOffset = 0.25f;
+        lfo.reset();
+        const float custom = lfo.process (st, 1, 48000.0, table, 10.0, std::nullopt);
+        check (std::abs (custom - 0.0f) < 0.02f && std::abs (sw::evaluatePoints (pts, 0.75f)) < 1.0e-4f,
+               "custom shape interpolates and wraps: " + juce::String (custom, 3) + " (expected 0)");
+
+        const auto round = sw::pointsFromString (sw::pointsToString (sw::defaultCustomPoints()));
+        check (round.size() == sw::defaultCustomPoints().size(), "custom shape survives save/load");
     }
 
     std::printf ("\n%s (%d failure%s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures, failures == 1 ? "" : "s");

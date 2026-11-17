@@ -23,13 +23,7 @@ namespace
         return std::make_unique<juce::AudioParameterFloat> (juce::ParameterID { id, 1 }, name, range, def, attrs);
     }
 
-    const char* const allParamIds[] = { "start", "length", "speed", "freeze", "loop", "keyTrack", "root", "tune", "bendRange",
-                                        "blur", "smear", "tonal", "tilt", "gate", "warp", "shift", "phaseRand",
-                                        "crossMode", "crossAmount", "envWidth", "syncB", "speedB",
-                                        "attack", "decay", "sustain", "release", "gain",
-                                        "lfoRate", "lfoDepth", "lfoShape", "lfoTarget", "normA", "normB" };
-
-    const char* const resettableGroups[] = { "playback", "cross", "spectral", "lfo", "amp" };
+    const char* const resettableGroups[] = { "playback", "cross", "spectral", "amp", "lfo1", "lfo2" };
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout SpectralWeaverProcessor::createLayout()
@@ -71,17 +65,49 @@ juce::AudioProcessorValueTreeState::ParameterLayout SpectralWeaverProcessor::cre
                    floatParam ("release", "Release", skewed (0.001f, 10.0f, 1.0f), 0.5f, "s", 3),
                    floatParam ("gain",    "Gain",    { -48.0f, 12.0f }, -6.0f, "dB", 1));
 
-    auto lfo = std::make_unique<juce::AudioProcessorParameterGroup> ("lfo", "LFO", "|");
-    lfo->addChild (floatParam ("lfoRate",  "LFO Rate",  skewed (0.01f, 20.0f, 1.0f), 0.5f, "Hz"),
-                   floatParam ("lfoDepth", "LFO Depth", { 0.0f, 1.0f }, 0.0f),
-                   std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "lfoShape", 1 }, "LFO Shape", lfoShapeNames(), 0),
-                   std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { "lfoTarget", 1 }, "LFO Target", lfoTargetNames(), 0));
+    std::array<std::unique_ptr<juce::AudioProcessorParameterGroup>, sw::numLfos> lfoGroups;
+
+    for (int i = 0; i < sw::numLfos; ++i)
+    {
+        const auto n = juce::String (i + 1);
+        const auto id = [i] (const char* suffix) { return juce::ParameterID { sw::lfoParamId (i, suffix), 1 }; };
+        const auto fp = [&] (const char* suffix, const juce::String& name, juce::NormalisableRange<float> r, float def, const char* unit, int dec)
+        {
+            auto attrs = juce::AudioParameterFloatAttributes().withLabel (unit)
+                             .withStringFromValueFunction ([dec] (float v, int) { return juce::String (v, dec); });
+            return std::make_unique<juce::AudioParameterFloat> (id (suffix), name, r, def, attrs);
+        };
+
+        auto g = std::make_unique<juce::AudioProcessorParameterGroup> ("lfo" + n, "LFO " + n, "|");
+        g->addChild (std::make_unique<juce::AudioParameterChoice> (id ("Shape"), "LFO " + n + " Shape", sw::lfoShapeNames(), 0),
+                     fp ("Rate", "LFO " + n + " Rate", skewed (0.01f, 20.0f, 1.0f), i == 0 ? 0.5f : 2.0f, "Hz", 2),
+                     std::make_unique<juce::AudioParameterBool> (id ("Sync"), "LFO " + n + " Tempo Sync", false),
+                     std::make_unique<juce::AudioParameterChoice> (id ("Div"), "LFO " + n + " Division", sw::lfoDivisionNames(), 5),
+                     fp ("Phase", "LFO " + n + " Phase", { 0.0f, 360.0f }, 0.0f, "deg", 0),
+                     fp ("Smooth", "LFO " + n + " Smooth", { 0.0f, 1.0f }, 0.0f, "", 2),
+                     fp ("Fade", "LFO " + n + " Fade In", skewed (0.0f, 5.0f, 1.0f), 0.0f, "s", 2),
+                     std::make_unique<juce::AudioParameterChoice> (id ("Retrig"), "LFO " + n + " Trigger", sw::lfoTriggerNames(), 0),
+                     std::make_unique<juce::AudioParameterBool> (id ("Uni"), "LFO " + n + " Unipolar", false));
+        lfoGroups[(size_t) i] = std::move (g);
+    }
+
+    // One automatable depth per LFO and target; 0 means "not routed"
+    auto modulation = std::make_unique<juce::AudioProcessorParameterGroup> ("modulation", "Modulation Depths", "|");
+
+    for (int i = 0; i < sw::numLfos; ++i)
+        for (int t = 0; t < sw::modTargetIds().size(); ++t)
+            modulation->addChild (std::make_unique<juce::AudioParameterFloat> (
+                juce::ParameterID { sw::modDepthId (i, sw::modTargetIds()[t]), 1 },
+                "LFO " + juce::String (i + 1) + " > " + sw::modTargetNames()[t],
+                juce::NormalisableRange<float> (-1.0f, 1.0f), 0.0f,
+                juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return juce::String (juce::roundToInt (v * 100.0f)) + "%"; })));
 
     auto samples = std::make_unique<juce::AudioProcessorParameterGroup> ("samples", "Samples", "|");
     samples->addChild (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "normA", 1 }, "Normalize A", false),
                        std::make_unique<juce::AudioParameterBool> (juce::ParameterID { "normB", 1 }, "Normalize B", false));
 
-    layout.add (std::move (playback), std::move (spectral), std::move (cross), std::move (amp), std::move (lfo), std::move (samples));
+    layout.add (std::move (playback), std::move (spectral), std::move (cross), std::move (amp), std::move (lfoGroups[0]), std::move (lfoGroups[1]),
+                std::move (modulation), std::move (samples));
     return layout;
 }
 
@@ -90,11 +116,36 @@ SpectralWeaverProcessor::SpectralWeaverProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       parameters (*this, nullptr, "SpectralWeaver", createLayout())
 {
-    for (auto* id : allParamIds)
+    for (auto* p : getParameters())
+        if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*> (p))
+            params[ranged->paramID.toStdString()] = parameters.getRawParameterValue (ranged->paramID);
+
+    for (int i = 0; i < sw::numLfos; ++i)
     {
-        params[id] = parameters.getRawParameterValue (id);
-        jassert (params[id] != nullptr);
+        const auto raw = [&] (const char* suffix) { return parameters.getRawParameterValue (sw::lfoParamId (i, suffix)); };
+        lfoParams[(size_t) i] = { raw ("Shape"), raw ("Rate"), raw ("Sync"), raw ("Div"), raw ("Phase"),
+                                  raw ("Smooth"), raw ("Fade"), raw ("Retrig"), raw ("Uni") };
     }
+
+    jassert (sw::modTargetIds().size() <= (int) modValues.size());
+
+    for (const auto& id : sw::modTargetIds())
+    {
+        ModTarget t;
+        t.base  = parameters.getRawParameterValue (id);
+        t.range = parameters.getParameterRange (id);
+        t.isInt = id == "envWidth";
+
+        for (int i = 0; i < sw::numLfos; ++i)
+            t.depth[(size_t) i] = parameters.getRawParameterValue (sw::modDepthId (i, id));
+
+        modTargets.push_back (t);
+    }
+
+    for (auto& m : modulatedNorm)
+        m = -1.0f;
+
+    loadCustomShapesFromState();
 
     formatManager.registerBasicFormats();
 
@@ -137,32 +188,6 @@ void SpectralWeaverProcessor::prepareToPlay (double sampleRate, int)
 }
 
 //==============================================================================
-float SpectralWeaverProcessor::nextLfoValue (int numSamples)
-{
-    const auto shape = (int) param ("lfoShape");
-    const double phase = lfoPhase;
-    float value = 0.0f;
-
-    switch (shape)
-    {
-        case 0:  value = (float) std::sin (juce::MathConstants<double>::twoPi * phase); break;
-        case 1:  value = (float) (1.0 - 4.0 * std::abs (phase - 0.5)); break;
-        case 2:  value = (float) (2.0 * phase - 1.0); break;
-        case 3:  value = phase < 0.5 ? 1.0f : -1.0f; break;
-        default: value = lfoRandomValue; break;
-    }
-
-    lfoPhase += param ("lfoRate") * numSamples / currentSampleRate;
-
-    if (lfoPhase >= 1.0)
-    {
-        lfoPhase -= std::floor (lfoPhase);
-        lfoRandomValue = lfoRandom.nextFloat() * 2.0f - 1.0f;
-    }
-
-    return value;
-}
-
 void SpectralWeaverProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -192,56 +217,30 @@ void SpectralWeaverProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
     rp.levelA = (rp.imageA != nullptr && param ("normA") > 0.5f) ? 1.0f / rp.imageA->samplePeak : 1.0f;
     rp.levelB = (rp.imageB != nullptr && param ("normB") > 0.5f) ? 1.0f / rp.imageB->samplePeak : 1.0f;
 
-    rp.start          = param ("start");
-    rp.length         = param ("length");
-    rp.speed          = param ("speed");
-    rp.freeze         = param ("freeze") > 0.5f;
-    rp.loop           = param ("loop") > 0.5f;
-    rp.keyTrack       = param ("keyTrack") > 0.5f;
-    rp.rootNote       = param ("root");
-    rp.fineSemitones  = param ("tune");
-    rp.pitchBendRange = param ("bendRange");
-    rp.blur           = param ("blur");
-    rp.smear          = param ("smear");
-    rp.tonal          = param ("tonal");
-    rp.tiltDb         = param ("tilt");
-    rp.gateDb         = param ("gate");
-    rp.warp           = param ("warp");
-    rp.shiftHz        = param ("shift");
-    rp.phaseRandom    = param ("phaseRand");
-    rp.crossMode      = (sw::CrossMode) juce::jlimit (0, (int) sw::CrossMode::numModes - 1, (int) param ("crossMode"));
-    rp.crossAmount    = juce::jlimit (0.0f, 1.0f, param ("crossAmount") + modWheel);
-    rp.envelopeWidth  = (int) param ("envWidth");
-    rp.syncB          = param ("syncB") > 0.5f;
-    rp.speedB         = param ("speedB");
-    rp.gain           = juce::Decibels::decibelsToGain (param ("gain"));
-    rp.extraSemitones = 0.0f;
+    // Host tempo and position, for tempo-synced LFOs
+    double bpm = 120.0;
+    std::optional<double> ppq;
 
-    // LFO
-    const float lfo = nextLfoValue (numSamples) * param ("lfoDepth");
-
-    if (std::abs (lfo) > 0.0f)
+    if (auto* hostPlayHead = getPlayHead())
     {
-        switch ((int) param ("lfoTarget"))
+        if (const auto pos = hostPlayHead->getPosition())
         {
-            case 0: rp.start          = juce::jlimit (0.0f, 1.0f, rp.start + lfo * 0.5f); break;
-            case 1: rp.extraSemitones = lfo * 12.0f; break;
-            case 2: rp.warp           = juce::jlimit (0.25f, 4.0f, rp.warp * std::pow (2.0f, lfo)); break;
-            case 3: rp.shiftHz       += lfo * 1000.0f; break;
-            case 4: rp.tiltDb        += lfo * 12.0f; break;
-            case 5: rp.crossAmount    = juce::jlimit (0.0f, 1.0f, rp.crossAmount + lfo); break;
-            case 6: rp.smear          = juce::jlimit (0.0f, 1.0f, rp.smear + lfo); break;
-            case 7: rp.blur           = juce::jlimit (0.0f, 1.0f, rp.blur + lfo); break;
-            default: break;
+            if (const auto b = pos->getBpm())
+                bpm = juce::jlimit (20.0, 999.0, *b);
+
+            if (pos->getIsPlaying())
+                if (const auto q = pos->getPpqPosition())
+                    ppq = *q;
         }
     }
 
-    const juce::ADSR::Parameters env { param ("attack"), param ("decay"), param ("sustain"), param ("release") };
+    hostBpm = bpm;
 
-    for (auto* v : voices)
-        v->setEnvelope (env);
+    // Modulation is refreshed every 64 samples
+    constexpr int chunk = 64;
 
-    synth.renderNextBlock (buffer, midi, 0, numSamples);
+    for (int start = 0; start < numSamples; start += chunk)
+        renderChunk (buffer, midi, start, juce::jmin (chunk, numSamples - start), ppq, bpm);
 
     // Gentle safety saturation above 0 dBFS
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
@@ -257,6 +256,123 @@ void SpectralWeaverProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
                 d[i] = std::copysign (0.9f + 0.1f * std::tanh ((ax - 0.9f) * 10.0f), x);
         }
     }
+}
+
+void SpectralWeaverProcessor::renderChunk (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi, int start, int length,
+                                           std::optional<double> ppqAtBlockStart, double bpm)
+{
+    const double sr = currentSampleRate;
+
+    // Note-ons in this chunk restart the fade-in and retrigger LFOs set to do so
+    for (const auto meta : midi)
+    {
+        if (meta.samplePosition >= start && meta.samplePosition < start + length && meta.getMessage().isNoteOn())
+        {
+            secondsSinceNote = 0.0;
+
+            for (int i = 0; i < sw::numLfos; ++i)
+                if (lfoParams[(size_t) i].retrig->load() > 0.5f)
+                    lfos[(size_t) i].retrigger();
+
+            break;
+        }
+    }
+
+    std::array<float, sw::numLfos> lfoOut {};
+    const auto& divisions = sw::lfoDivisions();
+
+    for (int i = 0; i < sw::numLfos; ++i)
+    {
+        const auto& lp = lfoParams[(size_t) i];
+        const bool sync = lp.sync->load() > 0.5f;
+        const double beats = divisions[(size_t) juce::jlimit (0, (int) divisions.size() - 1, (int) lp.div->load())].beats;
+
+        sw::Lfo::Settings s;
+        s.shape       = juce::jlimit (0, sw::numLfoShapes - 1, (int) lp.shape->load());
+        s.rateHz      = sync ? bpm / 60.0 / beats : (double) lp.rate->load();
+        s.phaseOffset = lp.phase->load() / 360.0f;
+        s.smooth      = lp.smooth->load();
+        s.fadeSeconds = lp.fade->load();
+        s.unipolar    = lp.uni->load() > 0.5f;
+
+        std::optional<double> cycle;
+
+        if (sync && ppqAtBlockStart.has_value())
+            cycle = (*ppqAtBlockStart + start / sr * bpm / 60.0) / beats;
+
+        lfoOut[(size_t) i] = lfos[(size_t) i].process (s, length, sr, customTables[(size_t) i], secondsSinceNote, cycle);
+    }
+
+    secondsSinceNote += length / sr;
+
+    // Every target: normalised base position + sum of (depth * LFO), clamped to the knob's travel
+    for (size_t t = 0; t < modTargets.size(); ++t)
+    {
+        const auto& mt = modTargets[t];
+        const float base = mt.base->load();
+        float offset = 0.0f;
+        bool routed = false;
+
+        for (size_t i = 0; i < (size_t) sw::numLfos; ++i)
+        {
+            const float d = mt.depth[i]->load();
+            routed = routed || ! juce::exactlyEqual (d, 0.0f);
+            offset += d * lfoOut[i];
+        }
+
+        if (! routed)
+        {
+            modValues[t] = base;
+            modulatedNorm[t] = -1.0f;
+            continue;
+        }
+
+        const float norm = juce::jlimit (0.0f, 1.0f, mt.range.convertTo0to1 (base) + offset);
+        float value = mt.range.convertFrom0to1 (norm);
+
+        if (mt.isInt)
+            value = (float) juce::roundToInt (value);
+
+        modValues[t] = value;
+        modulatedNorm[t] = norm;
+    }
+
+    // Indices follow sw::modTargetIds()
+    const auto mv = [this] (int index) { return modValues[(size_t) index]; };
+    auto& rp = renderParams;
+
+    rp.start          = mv (0);
+    rp.length         = mv (1);
+    rp.speed          = mv (2);
+    rp.fineSemitones  = mv (3);
+    rp.crossAmount    = juce::jlimit (0.0f, 1.0f, mv (4) + modWheel);
+    rp.envelopeWidth  = (int) mv (5);
+    rp.speedB         = mv (6);
+    rp.blur           = mv (7);
+    rp.smear          = mv (8);
+    rp.tonal          = mv (9);
+    rp.tiltDb         = mv (10);
+    rp.gateDb         = mv (11);
+    rp.warp           = mv (12);
+    rp.shiftHz        = mv (13);
+    rp.phaseRandom    = mv (14);
+    rp.gain           = juce::Decibels::decibelsToGain (mv (16));
+
+    rp.freeze         = param ("freeze") > 0.5f;
+    rp.loop           = param ("loop") > 0.5f;
+    rp.keyTrack       = param ("keyTrack") > 0.5f;
+    rp.rootNote       = param ("root");
+    rp.pitchBendRange = param ("bendRange");
+    rp.crossMode      = (sw::CrossMode) juce::jlimit (0, (int) sw::CrossMode::numModes - 1, (int) param ("crossMode"));
+    rp.syncB          = param ("syncB") > 0.5f;
+    rp.extraSemitones = 0.0f;
+
+    const juce::ADSR::Parameters env { param ("attack"), param ("decay"), mv (15), param ("release") };
+
+    for (auto* v : voices)
+        v->setEnvelope (env);
+
+    synth.renderNextBlock (buffer, midi, start, length);
 }
 
 //==============================================================================
@@ -339,6 +455,134 @@ void SpectralWeaverProcessor::resetGroup (const juce::String& groupId)
             param->setValueNotifyingHost (param->getDefaultValue());
             param->endChangeGesture();
         }
+    }
+
+    for (int i = 0; i < sw::numLfos; ++i)
+    {
+        if (groupId != "lfo" + juce::String (i + 1))
+            continue;
+
+        for (const auto& target : getRoutes (i))
+            removeRoute (i, target);
+
+        setCustomPoints (i, sw::defaultCustomPoints());
+    }
+}
+
+//==============================================================================
+void SpectralWeaverProcessor::setParamValue (const juce::String& id, float normalisedValue)
+{
+    if (auto* p = parameters.getParameter (id))
+    {
+        p->beginChangeGesture();
+        p->setValueNotifyingHost (normalisedValue);
+        p->endChangeGesture();
+    }
+}
+
+juce::ValueTree SpectralWeaverProcessor::routesTree()
+{
+    return parameters.state.getOrCreateChildWithName ("ROUTES", nullptr);
+}
+
+void SpectralWeaverProcessor::addRoute (int lfo, const juce::String& targetId)
+{
+    if (! sw::modTargetIds().contains (targetId) || lfo < 0 || lfo >= sw::numLfos)
+        return;
+
+    if (! hasRoute (lfo, targetId))
+    {
+        juce::ValueTree route ("ROUTE");
+        route.setProperty ("lfo", lfo, nullptr);
+        route.setProperty ("target", targetId, nullptr);
+        routesTree().appendChild (route, nullptr);
+    }
+
+    const auto depthId = sw::modDepthId (lfo, targetId);
+
+    if (juce::exactlyEqual (parameters.getRawParameterValue (depthId)->load(), 0.0f))
+        setParamValue (depthId, parameters.getParameterRange (depthId).convertTo0to1 (0.5f));
+}
+
+void SpectralWeaverProcessor::removeRoute (int lfo, const juce::String& targetId)
+{
+    auto routes = routesTree();
+
+    for (int i = routes.getNumChildren(); --i >= 0;)
+    {
+        const auto r = routes.getChild (i);
+
+        if ((int) r["lfo"] == lfo && r["target"].toString() == targetId)
+            routes.removeChild (i, nullptr);
+    }
+
+    const auto depthId = sw::modDepthId (lfo, targetId);
+
+    if (auto* p = parameters.getParameter (depthId))
+        setParamValue (depthId, p->getDefaultValue());
+}
+
+bool SpectralWeaverProcessor::hasRoute (int lfo, const juce::String& targetId) const
+{
+    const auto routes = parameters.state.getChildWithName ("ROUTES");
+
+    for (const auto& r : routes)
+        if ((int) r["lfo"] == lfo && r["target"].toString() == targetId)
+            return true;
+
+    return false;
+}
+
+juce::StringArray SpectralWeaverProcessor::getRoutes (int lfo) const
+{
+    juce::StringArray result;
+
+    for (const auto& r : parameters.state.getChildWithName ("ROUTES"))
+        if ((int) r["lfo"] == lfo)
+            result.addIfNotAlreadyThere (r["target"].toString());
+
+    return result;
+}
+
+sw::ShapePoints SpectralWeaverProcessor::getCustomPoints (int lfo) const
+{
+    return customPoints[(size_t) lfo];
+}
+
+void SpectralWeaverProcessor::setCustomPoints (int lfo, sw::ShapePoints points)
+{
+    for (auto& p : points)
+        p = { juce::jlimit (0.0f, 0.999f, p.x), juce::jlimit (-1.0f, 1.0f, p.y) };
+
+    std::sort (points.begin(), points.end(), [] (auto a, auto b) { return a.x < b.x; });
+
+    if (points.size() < 2)
+        points = sw::defaultCustomPoints();
+
+    customPoints[(size_t) lfo] = points;
+    customTables[(size_t) lfo].setPoints (points);
+
+    auto shapes = parameters.state.getOrCreateChildWithName ("LFOSHAPES", nullptr);
+    auto shape = shapes.getChildWithProperty ("index", lfo);
+
+    if (! shape.isValid())
+    {
+        shape = juce::ValueTree ("SHAPE");
+        shape.setProperty ("index", lfo, nullptr);
+        shapes.appendChild (shape, nullptr);
+    }
+
+    shape.setProperty ("points", sw::pointsToString (points), nullptr);
+}
+
+void SpectralWeaverProcessor::loadCustomShapesFromState()
+{
+    const auto shapes = parameters.state.getChildWithName ("LFOSHAPES");
+
+    for (int i = 0; i < sw::numLfos; ++i)
+    {
+        const auto shape = shapes.getChildWithProperty ("index", i);
+        setCustomPoints (i, shape.isValid() ? sw::pointsFromString (shape["points"].toString()) : sw::defaultCustomPoints());
     }
 }
 
@@ -424,6 +668,7 @@ void SpectralWeaverProcessor::setStateInformation (const void* data, int sizeInB
 
     const auto state = juce::ValueTree::fromXml (*xml);
     parameters.replaceState (state);
+    loadCustomShapesFromState();
 
     for (int slot = 0; slot < numSlots; ++slot)
     {

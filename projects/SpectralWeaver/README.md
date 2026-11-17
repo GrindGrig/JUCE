@@ -28,7 +28,7 @@ first one with its own spectrum.
 | **Playback / Scan** | Start, Length (scan region, shown on the spectrogram), Speed (−4x … 4x, negative = reverse), Freeze (scrub with Start), Loop, Root note, Tune, Pitch-bend range, Key Track |
 | **B → A Cross Modulation** | **Vocode**: A's fine structure wearing B's spectral envelope. **Multiply**: A filtered by B, bin by bin. **Morph**: geometric interpolation of the two images. **Mask**: B's energy gates A's bins. **Imprint**: B's harmonics/pitch coloured by A's envelope. Plus Amount (the mod wheel adds to it), Envelope Width, Sync to A (B follows A's playhead) or a free-running B Speed |
 | **Spectral Sculpting** | Blur (temporal smoothing), Smear (frequency smoothing), Tonal (+ keeps only spectral peaks, − keeps only the residual noise), Tilt (dB/oct), Gate (drop bins below a threshold), Warp (inharmonic frequency stretch), Shift (linear Hz shift), Diffuse (phase randomisation) |
-| **LFO** | Rate, Depth, Shape (sine/tri/saw/square/random), Target (Position, Pitch, Warp, Shift, Tilt, Cross Amount, Smear, Blur) |
+| **LFO 1 & 2** | Shape (sine, triangle, saw up/down, square, random S&H, smooth random, or a custom shape you draw), Rate or tempo-synced Division (locks to the host song position while playing), Phase, Smooth, Fade In, free-running or retrigger on each note, unipolar or bipolar |
 | **Amp** | ADSR, Gain |
 
 To load a sample, drag an audio file (WAV/AIFF/FLAC/OGG/MP3, up to 60 s) onto
@@ -38,6 +38,28 @@ File paths are saved with the session.
 Each sample keeps its original level. **Normalize** (on each sample) raises or
 lowers it so its peak sits at 0 dB, and **Swap A <> B** exchanges the two
 samples; the Normalize setting moves with its sample.
+
+### Modulation
+
+Each LFO can drive any number of knobs, and one knob can take both LFOs. There
+are two ways to route an LFO:
+
+- Drag the LFO's **Drag onto a knob** handle onto a knob.
+- Pick a knob from the LFO's **+ Add target** menu.
+
+Each routed knob appears in the LFO's target list with a depth slider, from
+-100 % to +100 % of the knob's travel (negative depths invert the LFO). Click x
+to remove a target. Coloured rings on a knob show each LFO's range, and a white
+dot shows the live modulated value. Every depth is an automatable parameter
+("LFO 1 > Tilt" and so on). The modulatable knobs are Start, Length, Speed,
+Tune, Cross Amount, Env Width, B Speed, the eight sculpting controls, Sustain
+and Gain.
+
+To make a custom shape, click or drag on an LFO's shape display. Drawing on a
+built-in shape turns it into an editable copy. Double-click a point to delete
+it, and hold Shift to snap to the grid. Custom shapes and routes are saved with
+the session. An LFO's **Reset** button restores its settings, removes its
+targets and brings back the default custom shape.
 
 To reset, double-click a knob to return just that knob to its default. Every
 section has a **Reset** button for that section, and **Reset All** in the

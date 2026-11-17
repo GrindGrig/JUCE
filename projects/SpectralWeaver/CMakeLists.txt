@@ -39,6 +39,7 @@ target_sources(SpectralWeaver
     PRIVATE
         Source/SpectralAnalysis.cpp
         Source/SpectralVoice.cpp
+        Source/Modulation.cpp
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp)
 
@@ -66,7 +67,8 @@ if(SPECTRAL_WEAVER_BUILD_TESTS)
         PRIVATE
             Tests/TestMain.cpp
             Source/SpectralAnalysis.cpp
-            Source/SpectralVoice.cpp)
+            Source/SpectralVoice.cpp
+            Source/Modulation.cpp)
     target_include_directories(SpectralWeaverTests PRIVATE Source)
     target_compile_definitions(SpectralWeaverTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
     target_link_libraries(SpectralWeaverTests
