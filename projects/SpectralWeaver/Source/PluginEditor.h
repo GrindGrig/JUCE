@@ -6,18 +6,31 @@ namespace ui
 {
     namespace colours
     {
-        const juce::Colour background { 0xff0e0d14 };
-        const juce::Colour panel      { 0xff17151f };
-        const juce::Colour outline    { 0xff2a2736 };
-        const juce::Colour text       { 0xffe8e6f0 };
-        const juce::Colour dim        { 0xff8a86a0 };
-        const juce::Colour accentA    { 0xffff7a59 };
-        const juce::Colour accentB    { 0xff57c7ff };
-        const juce::Colour accentFx   { 0xffb388ff };
-        const juce::Colour lfo1       { 0xff8ef0a8 };
-        const juce::Colour lfo2       { 0xffff8fd2 };
+        // Cicada theme: night foliage ground, smoky wing-membrane panels, amber venation
+        const juce::Colour background { 0xff0a0c08 };
+        const juce::Colour well       { 0xff060805 };
+        const juce::Colour panel      { 0xff161b11 };
+        const juce::Colour outline    { 0xff283022 };
+        const juce::Colour vein       { 0xffc9a25a };
+        const juce::Colour knob       { 0xff171c12 };
+        const juce::Colour text       { 0xffecead9 };
+        const juce::Colour dim        { 0xff8b9078 };
+        const juce::Colour accentA    { 0xffff5b3a };   // Magicicada eye
+        const juce::Colour accentB    { 0xff4fd6c4 };   // wing iridescence, teal
+        const juce::Colour accentFx   { 0xffd8b25c };   // wing gold
+        const juce::Colour lfo1       { 0xffa6e05a };   // chlorophyll
+        const juce::Colour lfo2       { 0xffc79bff };   // wing iridescence, violet
         inline juce::Colour lfo (int index) { return index == 0 ? lfo1 : lfo2; }
     }
+
+    /** Smoky translucent panel with an amber vein edge. */
+    void paintMembrane (juce::Graphics&, juce::Rectangle<float>, bool highlighted = false);
+
+    /** Section title with a glowing marker dot. */
+    void paintTitle (juce::Graphics&, juce::Rectangle<int> area, const juce::String& title, juce::Colour);
+
+    /** Cicada emblem in a 40 x 40 box, drawn by the editor header. */
+    void paintCicada (juce::Graphics&, juce::Rectangle<float> area);
 
     class LookAndFeel final : public juce::LookAndFeel_V4
     {

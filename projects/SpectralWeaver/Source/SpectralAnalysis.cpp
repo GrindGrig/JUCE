@@ -12,13 +12,14 @@ namespace
         return p - twoPi * std::floor ((p + juce::MathConstants<float>::pi) / twoPi);
     }
 
-    // Perceptual colour ramp (dark violet -> magenta -> orange -> pale yellow)
+    // Colour ramp for the spectrogram display
     juce::Colour heatColour (float v) noexcept
     {
         struct Stop { float pos; juce::uint32 argb; };
-        static constexpr Stop stops[] = { { 0.00f, 0xff07050f }, { 0.25f, 0xff2b0f54 },
-                                          { 0.50f, 0xff8c2981 }, { 0.75f, 0xfff0605d },
-                                          { 1.00f, 0xfffcf6b6 } };
+        // Cicada palette: night foliage -> olive -> jade -> wing amber -> pale membrane
+        static constexpr Stop stops[] = { { 0.00f, 0xff050704 }, { 0.28f, 0xff1e2c12 },
+                                          { 0.52f, 0xff267054 }, { 0.76f, 0xffd6a040 },
+                                          { 1.00f, 0xfffaf4d2 } };
         v = juce::jlimit (0.0f, 1.0f, v);
 
         for (size_t i = 1; i < std::size (stops); ++i)

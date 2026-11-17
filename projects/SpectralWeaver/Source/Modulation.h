@@ -12,7 +12,7 @@ static constexpr int numLfos = 2;
 enum LfoShape { sine = 0, triangle, sawUp, sawDown, square, sampleHold, smoothRandom, custom, numLfoShapes };
 
 inline juce::StringArray lfoShapeNames()   { return { "Sine", "Triangle", "Saw Up", "Saw Down", "Square", "Random S&H", "Smooth Random", "Custom" }; }
-inline juce::StringArray lfoTriggerNames() { return { "Free running", "Retrigger on note" }; }
+inline juce::StringArray lfoTriggerNames() { return { "Free", "Retrigger" }; }
 
 struct LfoDivision { const char* name; double beats; };
 

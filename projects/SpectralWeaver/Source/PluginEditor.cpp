@@ -4,6 +4,74 @@ namespace ui
 {
 
 //==============================================================================
+void paintMembrane (juce::Graphics& g, juce::Rectangle<float> r, bool highlighted)
+{
+    juce::ColourGradient membrane (juce::Colour (0xff222a19).withAlpha (0.92f), r.getX(), r.getY(),
+                                   colours::panel.darker (0.35f).withAlpha (0.96f), r.getX() + r.getWidth() * 0.35f, r.getBottom(), false);
+    g.setGradientFill (membrane);
+    g.fillRoundedRectangle (r, 9.0f);
+
+    g.setColour (juce::Colours::white.withAlpha (0.035f));
+    g.drawHorizontalLine ((int) r.getY() + 1, r.getX() + 9.0f, r.getRight() - 9.0f);
+
+    g.setColour (highlighted ? colours::vein : colours::vein.withAlpha (0.17f));
+    g.drawRoundedRectangle (r.reduced (0.5f), 9.0f, highlighted ? 1.6f : 1.0f);
+}
+
+void paintTitle (juce::Graphics& g, juce::Rectangle<int> area, const juce::String& title, juce::Colour colour)
+{
+    const auto dot = juce::Rectangle<float> (6.0f, 6.0f).withCentre ({ (float) area.getX() + 3.0f, (float) area.getCentreY() });
+    g.setColour (colour.withAlpha (0.25f));
+    g.fillEllipse (dot.expanded (3.0f));
+    g.setColour (colour);
+    g.fillEllipse (dot);
+    g.setFont (juce::FontOptions (10.5f, juce::Font::bold).withKerningFactor (0.14f));
+    g.drawText (title, area.withTrimmedLeft (12), juce::Justification::centredLeft);
+}
+
+void paintCicada (juce::Graphics& g, juce::Rectangle<float> area)
+{
+    const auto t = juce::AffineTransform::scale (area.getWidth() / 40.0f, area.getHeight() / 40.0f).translated (area.getX(), area.getY());
+
+    juce::Path leftWing, rightWing, veins;
+    leftWing.startNewSubPath (18.5f, 13.0f);
+    leftWing.cubicTo (11.0f, 13.5f, 4.0f, 21.0f, 5.0f, 34.0f);
+    leftWing.cubicTo (10.0f, 35.0f, 16.5f, 28.0f, 19.0f, 18.0f);
+    leftWing.closeSubPath();
+    rightWing = leftWing;
+    rightWing.applyTransform (juce::AffineTransform::scale (-1.0f, 1.0f).translated (40.0f, 0.0f));
+
+    for (const auto& seg : { std::array<float, 4> { 18.0f, 16.0f, 9.0f, 30.0f }, { 16.5f, 15.0f, 7.0f, 24.0f }, { 18.6f, 20.0f, 13.0f, 32.0f } })
+    {
+        veins.addLineSegment ({ seg[0], seg[1], seg[2], seg[3] }, 0.6f);
+        veins.addLineSegment ({ 40.0f - seg[0], seg[1], 40.0f - seg[2], seg[3] }, 0.6f);
+    }
+
+    for (auto* wing : { &leftWing, &rightWing })
+    {
+        wing->applyTransform (t);
+        g.setGradientFill (juce::ColourGradient (colours::accentB.withAlpha (0.5f), area.getTopLeft(),
+                                                 colours::lfo2.withAlpha (0.45f), area.getBottomRight(), false));
+        g.fillPath (*wing);
+        g.setColour (colours::vein);
+        g.strokePath (*wing, juce::PathStrokeType (0.8f));
+    }
+
+    veins.applyTransform (t);
+    g.setColour (colours::vein.withAlpha (0.8f));
+    g.fillPath (veins);
+
+    const auto scaled = [&] (float x, float y, float w, float h) { return juce::Rectangle<float> (x, y, w, h).transformedBy (t); };
+    g.setColour (juce::Colour (0xff2a3a1b));
+    g.fillEllipse (scaled (16.6f, 13.0f, 6.8f, 18.0f));
+    g.setColour (juce::Colour (0xff33461f));
+    g.fillEllipse (scaled (14.8f, 8.5f, 10.4f, 6.0f));
+    g.setColour (colours::accentA);
+    g.fillEllipse (scaled (13.4f, 9.3f, 3.8f, 3.8f));
+    g.fillEllipse (scaled (22.8f, 9.3f, 3.8f, 3.8f));
+}
+
+//==============================================================================
 LookAndFeel::LookAndFeel()
 {
     setColour (juce::ResizableWindow::backgroundColourId, colours::background);
@@ -12,13 +80,17 @@ LookAndFeel::LookAndFeel()
     setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
     setColour (juce::Slider::textBoxHighlightColourId, colours::accentFx.withAlpha (0.4f));
-    setColour (juce::ComboBox::backgroundColourId, colours::background);
+    setColour (juce::ComboBox::backgroundColourId, colours::well);
+    setColour (juce::TooltipWindow::backgroundColourId, colours::well);
+    setColour (juce::TooltipWindow::textColourId, colours::text);
+    setColour (juce::TooltipWindow::outlineColourId, colours::vein.withAlpha (0.4f));
+    setColour (juce::ScrollBar::thumbColourId, colours::dim.withAlpha (0.6f));
     setColour (juce::ComboBox::textColourId, colours::text);
     setColour (juce::ComboBox::outlineColourId, colours::outline);
     setColour (juce::ComboBox::arrowColourId, colours::dim);
-    setColour (juce::PopupMenu::backgroundColourId, colours::panel);
+    setColour (juce::PopupMenu::backgroundColourId, colours::well);
     setColour (juce::PopupMenu::textColourId, colours::text);
-    setColour (juce::PopupMenu::highlightedBackgroundColourId, colours::accentFx.withAlpha (0.35f));
+    setColour (juce::PopupMenu::highlightedBackgroundColourId, colours::vein.withAlpha (0.3f));
     setColour (juce::PopupMenu::highlightedTextColourId, colours::text);
     setColour (juce::TextEditor::backgroundColourId, colours::background);
     setColour (juce::TextEditor::textColourId, colours::text);
@@ -33,7 +105,7 @@ void LookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int 
     const auto bounds = juce::Rectangle<int> (x, y, w, h).toFloat().reduced (4.0f);
     const float radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
     const auto centre = bounds.getCentre();
-    const float lineW = juce::jmax (2.5f, radius * 0.16f);
+    const float lineW = juce::jmax (2.0f, radius * 0.11f);
     const float arcR = radius - lineW * 0.5f;
 
     const bool bipolar = slider.getMinimum() < 0.0 && slider.getMaximum() > 0.0;
@@ -51,14 +123,19 @@ void LookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int 
     g.setColour (slider.isEnabled() ? accent : colours::dim);
     g.strokePath (value, juce::PathStrokeType (lineW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-    const float knobR = arcR - lineW * 1.4f;
-    g.setColour (colours::panel.brighter (0.12f));
-    g.fillEllipse (juce::Rectangle<float> (knobR * 2.0f, knobR * 2.0f).withCentre (centre));
+    // Glossy body, like a compound eye: lighter at the top left, amber vein rim
+    const float knobR = arcR - lineW * 1.8f;
+    const auto body = juce::Rectangle<float> (knobR * 2.0f, knobR * 2.0f).withCentre (centre);
+    g.setGradientFill (juce::ColourGradient (colours::knob.brighter (0.45f), centre.translated (-knobR * 0.5f, -knobR * 0.6f),
+                                             colours::knob.darker (0.3f), centre.translated (knobR * 0.6f, knobR * 0.7f), true));
+    g.fillEllipse (body);
+    g.setColour (colours::vein.withAlpha (0.3f));
+    g.drawEllipse (body, 0.8f);
 
-    const auto tip = centre.getPointOnCircumference (knobR * 0.85f, angle);
-    const auto mid = centre.getPointOnCircumference (knobR * 0.35f, angle);
+    const auto tip = centre.getPointOnCircumference (knobR * 0.82f, angle);
+    const auto mid = centre.getPointOnCircumference (knobR * 0.38f, angle);
     g.setColour (colours::text);
-    g.drawLine ({ mid, tip }, 2.0f);
+    g.drawLine ({ mid, tip }, 1.8f);
 }
 
 void LookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& b, bool highlighted, bool)
@@ -67,13 +144,19 @@ void LookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& b, bo
     const auto r = b.getLocalBounds().toFloat().reduced (1.0f);
     const bool on = b.getToggleState();
 
-    g.setColour (on ? accent.withAlpha (0.22f) : colours::background);
+    if (on)
+    {
+        g.setColour (accent.withAlpha (0.12f));
+        g.fillRoundedRectangle (r.expanded (1.0f), r.getHeight() * 0.5f + 1.0f);
+    }
+
+    g.setColour (on ? accent.withAlpha (0.2f) : colours::well);
     g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
     g.setColour (on ? accent : (highlighted ? colours::dim : colours::outline));
-    g.drawRoundedRectangle (r, r.getHeight() * 0.5f, 1.2f);
+    g.drawRoundedRectangle (r, r.getHeight() * 0.5f, 1.0f);
 
     g.setColour (on ? colours::text : colours::dim);
-    g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
+    g.setFont (juce::FontOptions (10.0f, juce::Font::bold).withKerningFactor (0.1f));
     g.drawText (b.getButtonText(), r, juce::Justification::centred);
 }
 
@@ -82,12 +165,12 @@ void LookAndFeel::drawComboBox (juce::Graphics& g, int w, int h, bool, int, int,
     const auto r = juce::Rectangle<int> (w, h).toFloat().reduced (0.5f);
     g.setColour (box.findColour (juce::ComboBox::backgroundColourId));
     g.fillRoundedRectangle (r, 5.0f);
-    g.setColour (box.hasKeyboardFocus (true) ? colours::accentFx : colours::outline);
+    g.setColour (box.hasKeyboardFocus (true) ? colours::vein : colours::outline);
     g.drawRoundedRectangle (r, 5.0f, 1.0f);
 
     juce::Path arrow;
-    const float ax = (float) w - 16.0f, ay = (float) h * 0.5f;
-    arrow.addTriangle (ax - 4.0f, ay - 2.0f, ax + 4.0f, ay - 2.0f, ax, ay + 3.0f);
+    const float ax = (float) w - 12.0f, ay = (float) h * 0.5f;
+    arrow.addTriangle (ax - 3.5f, ay - 1.5f, ax + 3.5f, ay - 1.5f, ax, ay + 2.5f);
     g.setColour (colours::dim);
     g.fillPath (arrow);
 }
@@ -96,16 +179,24 @@ void LookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b, cons
 {
     const auto r = b.getLocalBounds().toFloat().reduced (0.5f);
     const auto accent = b.findColour (juce::TextButton::buttonOnColourId);
-    g.setColour (down ? accent.withAlpha (0.3f) : (highlighted ? colours::panel.brighter (0.15f) : colours::background));
+    g.setColour (down ? accent.withAlpha (0.3f) : (highlighted ? colours::panel.brighter (0.15f) : colours::well));
     g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
     g.setColour (highlighted || down ? accent : colours::outline);
     g.drawRoundedRectangle (r, r.getHeight() * 0.5f, 1.1f);
 }
 
-juce::Font LookAndFeel::getTextButtonFont (juce::TextButton&, int) { return juce::FontOptions (11.5f, juce::Font::bold); }
+juce::Font LookAndFeel::getTextButtonFont (juce::TextButton&, int) { return juce::FontOptions (10.0f, juce::Font::bold).withKerningFactor (0.08f); }
 
-juce::Font LookAndFeel::getComboBoxFont (juce::ComboBox&) { return juce::FontOptions (13.0f); }
-juce::Font LookAndFeel::getLabelFont (juce::Label& l)     { return l.getFont(); }
+juce::Font LookAndFeel::getComboBoxFont (juce::ComboBox&) { return juce::FontOptions (11.5f); }
+
+juce::Font LookAndFeel::getLabelFont (juce::Label& l)
+{
+    // Slider value boxes use a small figure size
+    if (dynamic_cast<juce::Slider*> (l.getParentComponent()) != nullptr)
+        return juce::FontOptions (10.5f);
+
+    return l.getFont();
+}
 
 //==============================================================================
 Knob::Knob (juce::AudioProcessorValueTreeState& state, const juce::String& id,
@@ -118,7 +209,7 @@ Knob::Knob (juce::AudioProcessorValueTreeState& state, const juce::String& id,
     slider.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
     slider.setColour (juce::Slider::textBoxTextColourId, colours::text);
     slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-    slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 72, 16);
+    slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 64, 14);
     slider.setDoubleClickReturnValue (true, (double) state.getParameterRange (paramId)
                                                 .convertFrom0to1 (state.getParameter (paramId)->getDefaultValue()));
     slider.setPopupDisplayEnabled (false, false, nullptr);
@@ -126,7 +217,7 @@ Knob::Knob (juce::AudioProcessorValueTreeState& state, const juce::String& id,
 
     label.setText (caption, juce::dontSendNotification);
     label.setJustificationType (juce::Justification::centred);
-    label.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+    label.setFont (juce::FontOptions (9.5f, juce::Font::bold).withKerningFactor (0.1f));
     label.setColour (juce::Label::textColourId, colours::dim);
     label.setInterceptsMouseClicks (false, false);
 
@@ -137,7 +228,7 @@ Knob::Knob (juce::AudioProcessorValueTreeState& state, const juce::String& id,
 void Knob::resized()
 {
     auto r = getLocalBounds();
-    label.setBounds (r.removeFromTop (16));
+    label.setBounds (r.removeFromTop (13));
     slider.setBounds (r);
 }
 
@@ -209,7 +300,7 @@ void Knob::paintOverChildren (juce::Graphics& g)
     const auto bounds = layout.sliderBounds.toFloat().translated ((float) slider.getX(), (float) slider.getY()).reduced (4.0f);
     const float radius = juce::jmin (bounds.getWidth(), bounds.getHeight()) * 0.5f;
     const auto centre = bounds.getCentre();
-    const float lineW = juce::jmax (2.5f, radius * 0.16f);
+    const float lineW = juce::jmax (2.0f, radius * 0.11f);
     const auto rotary = slider.getRotaryParameters();
     const auto angleAt = [&] (float n) { return rotary.startAngleRadians + n * (rotary.endAngleRadians - rotary.startAngleRadians); };
     const float base = (float) slider.valueToProportionOfLength (slider.getValue());
@@ -224,12 +315,12 @@ void Knob::paintOverChildren (juce::Graphics& g)
         const bool uni = processor->parameters.getRawParameterValue (sw::lfoParamId (lfo, "Uni"))->load() > 0.5f;
         const float lo = juce::jlimit (0.0f, 1.0f, base + (uni ? juce::jmin (0.0f, d) : -std::abs (d)));
         const float hi = juce::jlimit (0.0f, 1.0f, base + (uni ? juce::jmax (0.0f, d) : std::abs (d)));
-        const float r = radius + 1.5f + (float) lfo * 3.0f;
+        const float r = radius + 1.2f + (float) lfo * 2.6f;
 
         juce::Path ring;
         ring.addCentredArc (centre.x, centre.y, r, r, 0.0f, angleAt (lo), angleAt (juce::jmax (hi, lo + 0.01f)), true);
         g.setColour (colours::lfo (lfo));
-        g.strokePath (ring, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.strokePath (ring, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 
     if (const float live = processor->getModulatedNorm (modIndex); live >= 0.0f)
@@ -374,8 +465,10 @@ void LfoDisplay::paint (juce::Graphics& g)
     const auto points = processor.getCustomPoints (lfo);
     if (dragIndex < 0) editing = points;
 
-    g.setColour (colours::background);
+    g.setColour (colours::well);
     g.fillRoundedRectangle (getLocalBounds().toFloat(), 6.0f);
+    g.setColour (colours::outline);
+    g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 6.0f, 1.0f);
 
     g.setColour (colours::outline);
     for (int q = 0; q <= 4; ++q)
@@ -425,7 +518,7 @@ void LfoDisplay::paint (juce::Graphics& g)
     g.fillEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ x, toScreen ({ 0.0f, shown }).y }));
 
     g.setColour (colours::dim);
-    g.setFont (juce::FontOptions (10.0f));
+    g.setFont (juce::FontOptions (9.5f));
     g.drawText (uni ? "1" : "+1", r.withHeight (12.0f).translated (3.0f, 1.0f), juce::Justification::centredLeft);
     g.drawText (uni ? "0" : "-1", r.withTop (r.getBottom() - 12.0f).translated (3.0f, -1.0f), juce::Justification::centredLeft);
 
@@ -457,10 +550,10 @@ void LfoDragHandle::paint (juce::Graphics& g)
     // grip dots
     for (int i = 0; i < 3; ++i)
         for (int j = 0; j < 2; ++j)
-            g.fillEllipse (r.getX() + 10.0f + (float) j * 4.0f, r.getCentreY() - 5.0f + (float) i * 4.0f, 2.2f, 2.2f);
+            g.fillEllipse (r.getX() + 8.0f + (float) j * 3.5f, r.getCentreY() - 4.5f + (float) i * 3.5f, 2.0f, 2.0f);
 
-    g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
-    g.drawText ("DRAG ONTO A KNOB", r.withTrimmedLeft (22.0f), juce::Justification::centredLeft);
+    g.setFont (juce::FontOptions (9.5f, juce::Font::bold).withKerningFactor (0.08f));
+    g.drawText ("DRAG ONTO A KNOB", r.withTrimmedLeft (20.0f), juce::Justification::centredLeft);
 }
 
 void LfoDragHandle::mouseDrag (const juce::MouseEvent& e)
@@ -480,12 +573,12 @@ RouteRow::RouteRow (SpectralWeaverProcessor& p, int lfo, const juce::String& tar
 {
     const int index = sw::modTargetIds().indexOf (targetId);
     name.setText (sw::modTargetNames()[index], juce::dontSendNotification);
-    name.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+    name.setFont (juce::FontOptions (10.5f, juce::Font::bold));
     name.setColour (juce::Label::textColourId, colour);
     name.setMinimumHorizontalScale (0.7f);
 
     depth.setSliderStyle (juce::Slider::LinearHorizontal);
-    depth.setTextBoxStyle (juce::Slider::TextBoxRight, false, 38, 18);
+    depth.setTextBoxStyle (juce::Slider::TextBoxRight, false, 36, 16);
     depth.setColour (juce::Slider::trackColourId, colour);
     depth.setColour (juce::Slider::backgroundColourId, colours::outline);
     depth.setColour (juce::Slider::thumbColourId, colours::text);
@@ -508,17 +601,17 @@ RouteRow::RouteRow (SpectralWeaverProcessor& p, int lfo, const juce::String& tar
 void RouteRow::paint (juce::Graphics& g)
 {
     const auto r = getLocalBounds().toFloat().reduced (0.5f);
-    g.setColour (colours::background);
+    g.setColour (colours::well);
     g.fillRoundedRectangle (r, r.getHeight() * 0.5f);
-    g.setColour (colour.withAlpha (0.45f));
+    g.setColour (colour.withAlpha (0.4f));
     g.drawRoundedRectangle (r, r.getHeight() * 0.5f, 1.0f);
 }
 
 void RouteRow::resized()
 {
     auto r = getLocalBounds().reduced (6, 2);
-    remove.setBounds (r.removeFromRight (20).withSizeKeepingCentre (20, 18));
-    name.setBounds (r.removeFromLeft (56));
+    remove.setBounds (r.removeFromRight (18).withSizeKeepingCentre (18, 16));
+    name.setBounds (r.removeFromLeft (48));
     depth.setBounds (r);
 }
 
@@ -543,7 +636,7 @@ LfoPanel::LfoPanel (SpectralWeaverProcessor& p, int index)
     unipolar->setTooltip ("Unipolar moves knobs one way only (0 to +1); bipolar swings both ways (-1 to +1)");
 
     hint.setText ("Draw to customise. Double-click deletes a point. Shift snaps.", juce::dontSendNotification);
-    hint.setFont (juce::FontOptions (11.0f));
+    hint.setFont (juce::FontOptions (10.0f));
     hint.setColour (juce::Label::textColourId, colours::dim);
     hint.setMinimumHorizontalScale (0.8f);
 
@@ -553,7 +646,7 @@ LfoPanel::LfoPanel (SpectralWeaverProcessor& p, int index)
     reset.onClick = [this] { processor.resetGroup ("lfo" + juce::String (lfo + 1)); };
 
     emptyRoutes.setText ("No targets yet. Drag the handle onto a knob, or add one from the menu.", juce::dontSendNotification);
-    emptyRoutes.setFont (juce::FontOptions (12.0f));
+    emptyRoutes.setFont (juce::FontOptions (10.5f));
     emptyRoutes.setColour (juce::Label::textColourId, colours::dim);
     routesContent.addChildComponent (emptyRoutes);
     routesView.setViewedComponent (&routesContent, false);
@@ -608,8 +701,8 @@ void LfoPanel::handleAsyncUpdate()
 
 void LfoPanel::layoutRoutes()
 {
-    const int width = juce::jmax (100, routesView.getWidth() - 8);
-    constexpr int rowW = 180, rowH = 24, gap = 6;
+    const int width = juce::jmax (100, routesView.getWidth() - 6);
+    constexpr int rowW = 162, rowH = 22, gap = 4;
     const int perLine = juce::jmax (1, (width + gap) / (rowW + gap));
 
     for (size_t i = 0; i < rows.size(); ++i)
@@ -635,61 +728,54 @@ void LfoPanel::refresh()
 
 void LfoPanel::paint (juce::Graphics& g)
 {
-    const auto b = getLocalBounds().toFloat();
-    g.setColour (colours::panel);
-    g.fillRoundedRectangle (b, 8.0f);
-    g.setColour (colours::outline);
-    g.drawRoundedRectangle (b.reduced (0.5f), 8.0f, 1.0f);
-
-    g.setColour (colour);
-    g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-    g.drawText ("LFO " + juce::String (lfo + 1), getLocalBounds().reduced (12, 8).removeFromTop (22), juce::Justification::centredLeft);
+    paintMembrane (g, getLocalBounds().toFloat());
+    paintTitle (g, getLocalBounds().reduced (10, 6).removeFromTop (20).withWidth (60), "LFO " + juce::String (lfo + 1), colour);
 
     g.setColour (colours::outline);
-    g.drawHorizontalLine (routesArea.getY() - 5, (float) routesArea.getX(), (float) routesArea.getRight());
+    g.drawHorizontalLine (routesArea.getY() - 4, (float) routesArea.getX(), (float) routesArea.getRight());
     g.setColour (colours::dim);
-    g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
-    g.drawText ("TARGETS", routesArea.withWidth (60).withHeight (24), juce::Justification::centredLeft);
+    g.setFont (juce::FontOptions (9.5f, juce::Font::bold).withKerningFactor (0.1f));
+    g.drawText ("TARGETS", routesArea.withWidth (54).withHeight (22), juce::Justification::centredLeft);
 }
 
 void LfoPanel::resized()
 {
-    auto r = getLocalBounds().reduced (12, 8);
-    auto header = r.removeFromTop (22);
+    auto r = getLocalBounds().reduced (10, 6);
+    auto header = r.removeFromTop (20);
     header.removeFromLeft (58);
-    handle.setBounds (header.removeFromLeft (160));
-    reset.setBounds (header.removeFromRight (62).withSizeKeepingCentre (62, 20));
-    r.removeFromTop (8);
+    handle.setBounds (header.removeFromLeft (140).withSizeKeepingCentre (140, 18));
+    reset.setBounds (header.removeFromRight (54).withSizeKeepingCentre (54, 18));
+    r.removeFromTop (4);
 
-    routesArea = r.removeFromBottom (58);
-    r.removeFromBottom (10);
+    routesArea = r.removeFromBottom (48);
+    r.removeFromBottom (8);
 
     {
         auto area = routesArea;
-        area.removeFromLeft (58);
-        addTarget.setBounds (area.removeFromRight (124).removeFromTop (24));
-        area.removeFromRight (8);
+        area.removeFromLeft (54);
+        addTarget.setBounds (area.removeFromRight (112).removeFromTop (22));
+        area.removeFromRight (6);
         routesView.setBounds (area);
         layoutRoutes();
     }
 
-    auto left = r.removeFromLeft (juce::jmin (280, r.getWidth() / 2));
-    hint.setBounds (left.removeFromBottom (16));
+    auto left = r.removeFromLeft (juce::jmin (250, r.getWidth() / 2));
+    hint.setBounds (left.removeFromBottom (13));
     left.removeFromBottom (2);
     display.setBounds (left);
-    r.removeFromLeft (12);
+    r.removeFromLeft (10);
 
-    auto row1 = r.removeFromTop (44);
+    auto row1 = r.removeFromTop (36);
     const int third = row1.getWidth() / 3;
-    shape   ->setBounds (row1.removeFromLeft (third).reduced (3, 0));
-    trigger ->setBounds (row1.removeFromLeft (third).reduced (3, 0));
-    division->setBounds (row1.reduced (3, 0));
-    r.removeFromTop (4);
+    shape   ->setBounds (row1.removeFromLeft (third).reduced (2, 0));
+    trigger ->setBounds (row1.removeFromLeft (third).reduced (2, 0));
+    division->setBounds (row1.reduced (2, 0));
+    r.removeFromTop (2);
 
-    auto toggles = r.removeFromRight (84).withSizeKeepingCentre (84, 54);
-    sync    ->setBounds (toggles.removeFromTop (24));
-    toggles.removeFromTop (6);
-    unipolar->setBounds (toggles.removeFromTop (24));
+    auto toggles = r.removeFromRight (76).withSizeKeepingCentre (76, 48);
+    sync    ->setBounds (toggles.removeFromTop (22));
+    toggles.removeFromTop (4);
+    unipolar->setBounds (toggles.removeFromTop (22));
 
     const int w = r.getWidth() / 4;
     for (auto* k : { rate.get(), phase.get(), smooth.get(), fade.get() })
@@ -702,9 +788,10 @@ Choice::Choice (juce::AudioProcessorValueTreeState& state, const juce::String& p
     : attachment ((box.addItemList (items, 1), state), paramId, box)
 {
     label.setText (caption, juce::dontSendNotification);
-    label.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+    label.setFont (juce::FontOptions (9.5f, juce::Font::bold).withKerningFactor (0.1f));
     label.setColour (juce::Label::textColourId, colours::dim);
     label.setJustificationType (juce::Justification::centredLeft);
+    label.setBorderSize ({ 0, 1, 0, 0 });
 
     addAndMakeVisible (box);
     addAndMakeVisible (label);
@@ -713,8 +800,8 @@ Choice::Choice (juce::AudioProcessorValueTreeState& state, const juce::String& p
 void Choice::resized()
 {
     auto r = getLocalBounds();
-    label.setBounds (r.removeFromTop (16));
-    box.setBounds (r.removeFromTop (26));
+    label.setBounds (r.removeFromTop (13));
+    box.setBounds (r.removeFromTop (22));
 }
 
 //==============================================================================
@@ -755,18 +842,18 @@ void SpectrogramView::refresh()
 
 void SpectrogramView::resized()
 {
-    auto header = getLocalBounds().reduced (12, 6).removeFromTop (20);
-    header.removeFromLeft (140);
-    normalise.setBounds (header.removeFromLeft (96));
-    header.removeFromLeft (6);
-    swap.setBounds (header.removeFromLeft (104));
-    header.removeFromLeft (10);
+    auto header = getLocalBounds().reduced (10, 5).removeFromTop (18);
+    header.removeFromLeft (130);
+    normalise.setBounds (header.removeFromLeft (84));
+    header.removeFromLeft (4);
+    swap.setBounds (header.removeFromLeft (92));
+    header.removeFromLeft (8);
     statusArea = header.toFloat();
 }
 
 juce::Rectangle<float> SpectrogramView::imageArea() const
 {
-    return getLocalBounds().toFloat().reduced (10.0f).withTrimmedTop (22.0f).withTrimmedLeft (30.0f);
+    return getLocalBounds().toFloat().reduced (8.0f).withTrimmedTop (20.0f).withTrimmedLeft (26.0f);
 }
 
 void SpectrogramView::timerCallback()
@@ -791,18 +878,12 @@ void SpectrogramView::timerCallback()
 void SpectrogramView::paint (juce::Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat();
-    g.setColour (colours::panel);
-    g.fillRoundedRectangle (bounds, 8.0f);
-    g.setColour (dragOver ? accent : colours::outline);
-    g.drawRoundedRectangle (bounds.reduced (0.5f), 8.0f, dragOver ? 2.0f : 1.0f);
+    paintMembrane (g, bounds, dragOver);
 
     // Header
-    auto header = bounds.reduced (12.0f, 6.0f).removeFromTop (20.0f);
-    g.setColour (accent);
-    g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-    g.drawText (title, header, juce::Justification::centredLeft);
+    paintTitle (g, getLocalBounds().reduced (10, 5).removeFromTop (18).withWidth (126), title, accent);
     g.setColour (colours::dim);
-    g.setFont (juce::FontOptions (12.0f));
+    g.setFont (juce::FontOptions (10.5f));
 
     auto statusText = processor.getStatus (slot);
 
@@ -843,7 +924,7 @@ void SpectrogramView::paint (juce::Graphics& g)
         g.fillPath (dashed);
 
         g.setColour (colours::text.withAlpha (0.8f));
-        g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
         g.drawText (processor.isLoading (slot) ? "Analysing spectrum..."
                                               : (slot == SpectralWeaverProcessor::slotA ? "Drop the source sample here"
                                                                                         : "Drop a modulator sample here"),
@@ -889,7 +970,7 @@ void SpectrogramView::paint (juce::Graphics& g)
             g.setColour (juce::Colours::black.withAlpha (0.5f));
             g.fillRect (area);
             g.setColour (colours::text);
-            g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
             g.drawText ("Analysing spectrum...", area, juce::Justification::centred);
         }
 
@@ -1020,7 +1101,13 @@ SpectralWeaverEditor::SpectralWeaverEditor (SpectralWeaverProcessor& p)
         addAndMakeVisible (*lfoPanels[(size_t) i]);
     }
 
-    keyboard.setColour (juce::MidiKeyboardComponent::keyDownOverlayColourId, accentA.withAlpha (0.6f));
+    keyboard.setColour (juce::MidiKeyboardComponent::whiteNoteColourId, juce::Colour (0xffdad7c2));
+    keyboard.setColour (juce::MidiKeyboardComponent::blackNoteColourId, juce::Colour (0xff12160e));
+    keyboard.setColour (juce::MidiKeyboardComponent::keySeparatorLineColourId, background);
+    keyboard.setColour (juce::MidiKeyboardComponent::shadowColourId, juce::Colours::transparentBlack);
+    keyboard.setColour (juce::MidiKeyboardComponent::upDownButtonBackgroundColourId, panel);
+    keyboard.setColour (juce::MidiKeyboardComponent::upDownButtonArrowColourId, dim);
+    keyboard.setColour (juce::MidiKeyboardComponent::keyDownOverlayColourId, accentA.withAlpha (0.75f));
     keyboard.setColour (juce::MidiKeyboardComponent::mouseOverKeyOverlayColourId, accentA.withAlpha (0.25f));
 
     for (size_t i = 0; i < resetButtons.size(); ++i)
@@ -1041,7 +1128,7 @@ SpectralWeaverEditor::SpectralWeaverEditor (SpectralWeaverProcessor& p)
     addAndMakeVisible (resetAllButton);
 
     processor.addChangeListener (this);
-    setSize (1240, 950);
+    setSize (1100, 800);
     startTimerHz (30);
 }
 
@@ -1070,13 +1157,8 @@ void SpectralWeaverEditor::changeListenerCallback (juce::ChangeBroadcaster*)
 
 void SpectralWeaverEditor::paintPanel (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& title, juce::Colour accent) const
 {
-    g.setColour (ui::colours::panel);
-    g.fillRoundedRectangle (r.toFloat(), 8.0f);
-    g.setColour (ui::colours::outline);
-    g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 8.0f, 1.0f);
-    g.setColour (accent);
-    g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-    g.drawText (title, r.reduced (12, 6).removeFromTop (20), juce::Justification::centredLeft);
+    ui::paintMembrane (g, r.toFloat());
+    ui::paintTitle (g, r.reduced (10, 5).removeFromTop (18).withTrimmedRight (60), title, accent);
 }
 
 void SpectralWeaverEditor::paint (juce::Graphics& g)
@@ -1084,15 +1166,41 @@ void SpectralWeaverEditor::paint (juce::Graphics& g)
     using namespace ui::colours;
     g.fillAll (background);
 
-    auto header = getLocalBounds().removeFromTop (48).reduced (18, 0);
+    // Faint wing venation across the background
+    {
+        juce::Path tile;
+        const float pts[][4] { { 0, 52, 38, 40 }, { 38, 40, 71, 58 }, { 71, 58, 104, 30 }, { 104, 30, 140, 47 }, { 140, 47, 180, 38 },
+                               { 38, 40, 33, 0 }, { 104, 30, 112, 0 }, { 71, 58, 77, 99 }, { 77, 99, 46, 121 }, { 46, 121, 0, 112 },
+                               { 77, 99, 118, 88 }, { 118, 88, 140, 47 }, { 118, 88, 150, 108 }, { 150, 108, 180, 96 },
+                               { 46, 121, 52, 140 }, { 150, 108, 156, 140 }, { 140, 47, 162, 0 } };
+        for (auto& p : pts)
+            tile.addLineSegment ({ p[0], p[1], p[2], p[3] }, 1.0f);
+
+        g.setColour (vein.withAlpha (0.05f));
+
+        for (int y = 0; y < getHeight(); y += 140)
+            for (int x = 0; x < getWidth(); x += 180)
+                g.fillPath (tile, juce::AffineTransform::translation ((float) x, (float) y));
+    }
+
+    auto header = getLocalBounds().removeFromTop (40).reduced (12, 0);
+    ui::paintCicada (g, header.removeFromLeft (28).withSizeKeepingCentre (28, 28).toFloat());
+    header.removeFromLeft (8);
     g.setColour (text);
-    g.setFont (juce::FontOptions (22.0f, juce::Font::bold));
+    g.setFont (juce::FontOptions (17.0f, juce::Font::bold).withKerningFactor (0.12f));
     g.drawText ("SPECTRAL WEAVER", header, juce::Justification::centredLeft);
     g.setColour (dim);
-    g.setFont (juce::FontOptions (12.5f));
-    g.drawText ("spectral resynthesis  /  cross-synthesis instrument", header.withTrimmedLeft (230), juce::Justification::centredLeft);
-    g.drawText ("drop a sample on A  -  play MIDI  -  drop a second sample on B to modulate A",
-                header.withTrimmedRight (124), juce::Justification::centredRight);
+    g.setFont (juce::FontOptions (10.5f).withKerningFactor (0.04f));
+    g.drawText ("spectral resynthesis instrument", header.withTrimmedLeft (212), juce::Justification::centredLeft);
+
+    // Iridescent hairline under the header
+    juce::ColourGradient sheen (accentB, 12.0f, 0.0f, lfo2, (float) getWidth() - 12.0f, 0.0f, false);
+    sheen.addColour (0.35, lfo1);
+    sheen.addColour (0.7, accentFx);
+    g.setGradientFill (sheen);
+    g.setOpacity (0.45f);
+    g.fillRect (12.0f, 39.0f, (float) getWidth() - 24.0f, 1.0f);
+    g.setOpacity (1.0f);
 
     paintPanel (g, playbackPanel, "PLAYBACK  /  SCAN", accentA);
     paintPanel (g, crossPanel,    "B  ->  A  CROSS MODULATION", accentB);
@@ -1113,77 +1221,79 @@ void SpectralWeaverEditor::resized()
             c->setBounds (r.removeFromLeft (w).reduced (3, 0));
     };
 
-    auto r = getLocalBounds().reduced (16, 0);
-    r.removeFromTop (48);
+    constexpr int gap = 8, knobH = 74;
 
-    auto keyboardArea = r.removeFromBottom (72).withTrimmedBottom (12);
+    auto r = getLocalBounds().reduced (12, 0);
+    r.removeFromTop (46);
+
+    auto keyboardArea = r.removeFromBottom (62).withTrimmedBottom (8);
     keyboard.setBounds (keyboardArea);
-    keyboard.setKeyWidth (juce::jmax (12.0f, (float) keyboardArea.getWidth() / 43.0f));
+    keyboard.setKeyWidth (juce::jmax (11.0f, (float) keyboardArea.getWidth() / 43.0f));
     keyboard.setLowestVisibleKey (36);
 
-    auto top = r.removeFromTop (230);
-    r.removeFromTop (10);
-    auto middle = r.removeFromTop (170);
-    r.removeFromTop (10);
-    auto bottom = r.removeFromTop (150);
-    r.removeFromTop (10);
-    auto mods = r.removeFromTop (250);
+    auto top = r.removeFromTop (190);
+    r.removeFromTop (gap);
+    auto middle = r.removeFromTop (136);
+    r.removeFromTop (gap);
+    auto bottom = r.removeFromTop (114);
+    r.removeFromTop (gap);
+    auto mods = r.removeFromTop (204);
 
-    lfoPanels[0]->setBounds (mods.removeFromLeft ((mods.getWidth() - 10) / 2));
-    mods.removeFromLeft (10);
+    lfoPanels[0]->setBounds (mods.removeFromLeft ((mods.getWidth() - gap) / 2));
+    mods.removeFromLeft (gap);
     lfoPanels[1]->setBounds (mods);
 
     // Top: source view + playback
-    playbackPanel = top.removeFromRight (440);
-    top.removeFromRight (10);
+    playbackPanel = top.removeFromRight (390);
+    top.removeFromRight (gap);
     viewA.setBounds (top);
 
     {
-        auto inner = playbackPanel.reduced (12).withTrimmedTop (22);
-        auto row1  = inner.removeFromTop (84);
+        auto inner = playbackPanel.reduced (10, 6).withTrimmedTop (20);
+        auto row1  = inner.removeFromTop (knobH);
         layoutRow (row1, { playbackKnobs[0], playbackKnobs[1], playbackKnobs[2] });
-        inner.removeFromTop (6);
-        auto row2  = inner.removeFromTop (84);
-        auto buttons = row2.removeFromRight (130).withSizeKeepingCentre (130, 84);
+        inner.removeFromTop (4);
+        auto row2  = inner.removeFromTop (knobH);
+        auto buttons = row2.removeFromRight (112).withSizeKeepingCentre (112, 74);
         layoutRow (row2, { playbackKnobs[3], playbackKnobs[4], playbackKnobs[5] });
-        freeze  .setBounds (buttons.removeFromTop (24).reduced (4, 0));
-        buttons.removeFromTop (6);
-        loop    .setBounds (buttons.removeFromTop (24).reduced (4, 0));
-        buttons.removeFromTop (6);
-        keyTrack.setBounds (buttons.removeFromTop (24).reduced (4, 0));
+        freeze  .setBounds (buttons.removeFromTop (22).reduced (3, 0));
+        buttons.removeFromTop (4);
+        loop    .setBounds (buttons.removeFromTop (22).reduced (3, 0));
+        buttons.removeFromTop (4);
+        keyTrack.setBounds (buttons.removeFromTop (22).reduced (3, 0));
     }
 
     // Middle: modulator view + cross modulation
-    crossPanel = middle.removeFromRight (440);
-    middle.removeFromRight (10);
+    crossPanel = middle.removeFromRight (390);
+    middle.removeFromRight (gap);
     viewB.setBounds (middle);
 
     {
-        auto inner = crossPanel.reduced (12).withTrimmedTop (24);
-        auto left  = inner.removeFromLeft (130);
-        crossMode.setBounds (left.removeFromTop (44));
-        left.removeFromTop (14);
-        syncB.setBounds (left.removeFromTop (26));
-        inner.removeFromLeft (8);
-        layoutRow (inner.withSizeKeepingCentre (inner.getWidth(), 92), crossKnobs);
+        auto inner = crossPanel.reduced (10, 6).withTrimmedTop (22);
+        auto left  = inner.removeFromLeft (118);
+        crossMode.setBounds (left.removeFromTop (36));
+        left.removeFromTop (10);
+        syncB.setBounds (left.removeFromTop (22));
+        inner.removeFromLeft (6);
+        layoutRow (inner.withSizeKeepingCentre (inner.getWidth(), knobH), crossKnobs);
     }
 
     // Bottom: spectral and amp
-    spectralPanel = bottom.removeFromLeft ((bottom.getWidth() - 10) * 3 / 5);
-    bottom.removeFromLeft (10);
+    spectralPanel = bottom.removeFromLeft ((bottom.getWidth() - gap) * 3 / 5);
+    bottom.removeFromLeft (gap);
     ampPanel = bottom;
 
     {
         const juce::Rectangle<int>* panels[] { &playbackPanel, &crossPanel, &spectralPanel, &ampPanel };
 
         for (size_t i = 0; i < resetButtons.size(); ++i)
-            resetButtons[i].setBounds (panels[i]->getRight() - 12 - 62, panels[i]->getY() + 7, 62, 20);
+            resetButtons[i].setBounds (panels[i]->getRight() - 10 - 54, panels[i]->getY() + 5, 54, 18);
 
-        resetAllButton.setBounds (getWidth() - 18 - 110, 11, 110, 26);
+        resetAllButton.setBounds (getWidth() - 12 - 92, 9, 92, 22);
     }
 
-    layoutRow (spectralPanel.reduced (10).withTrimmedTop (24).withSizeKeepingCentre (spectralPanel.getWidth() - 20, 92), spectralKnobs);
-    layoutRow (ampPanel.reduced (10).withTrimmedTop (24).withSizeKeepingCentre (ampPanel.getWidth() - 20, 92), ampKnobs);
+    layoutRow (spectralPanel.reduced (8, 6).withTrimmedTop (20).withSizeKeepingCentre (spectralPanel.getWidth() - 16, knobH), spectralKnobs);
+    layoutRow (ampPanel.reduced (8, 6).withTrimmedTop (20).withSizeKeepingCentre (ampPanel.getWidth() - 16, knobH), ampKnobs);
 
 
 }
