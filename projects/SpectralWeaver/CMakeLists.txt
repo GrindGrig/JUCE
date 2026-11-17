@@ -19,6 +19,9 @@ if(NOT TARGET juce::juce_core)
     add_subdirectory("${JUCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/JUCE")
 endif()
 
+# The shared Cicada look (palette, look-and-feel, painting helpers) used by all our plug-ins
+juce_add_module("${CMAKE_CURRENT_SOURCE_DIR}/../shared/cicada_ui")
+
 juce_add_plugin(SpectralWeaver
     COMPANY_NAME "Spectral Weaver"
     BUNDLE_ID com.spectralweaver.spectralweaver
@@ -54,6 +57,7 @@ target_link_libraries(SpectralWeaver
     PRIVATE
         juce::juce_audio_utils
         juce::juce_dsp
+        cicada_ui
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags

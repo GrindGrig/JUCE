@@ -1,51 +1,33 @@
 #pragma once
 
 #include "PluginProcessor.h"
+#include <cicada_ui/cicada_ui.h>
 
 namespace ui
 {
+    // The Cicada theme comes from the shared cicada_ui module; these are this editor's role names for it.
     namespace colours
     {
-        // Cicada theme: night foliage ground, smoky wing-membrane panels, amber venation
-        const juce::Colour background { 0xff0a0c08 };
-        const juce::Colour well       { 0xff060805 };
-        const juce::Colour panel      { 0xff161b11 };
-        const juce::Colour outline    { 0xff283022 };
-        const juce::Colour vein       { 0xffc9a25a };
-        const juce::Colour knob       { 0xff171c12 };
-        const juce::Colour text       { 0xffecead9 };
-        const juce::Colour dim        { 0xff8b9078 };
-        const juce::Colour accentA    { 0xffff5b3a };   // Magicicada eye
-        const juce::Colour accentB    { 0xff4fd6c4 };   // wing iridescence, teal
-        const juce::Colour accentFx   { 0xffd8b25c };   // wing gold
-        const juce::Colour lfo1       { 0xffa6e05a };   // chlorophyll
-        const juce::Colour lfo2       { 0xffc79bff };   // wing iridescence, violet
-        inline juce::Colour lfo (int index) { return index == 0 ? lfo1 : lfo2; }
+        const juce::Colour background = cicada::colours::bg;
+        const juce::Colour well       = cicada::colours::well;
+        const juce::Colour panel      = cicada::colours::membrane;
+        const juce::Colour outline    = cicada::colours::line;
+        const juce::Colour vein       = cicada::colours::vein;
+        const juce::Colour knob       = cicada::colours::knob;
+        const juce::Colour text       = cicada::colours::ink;
+        const juce::Colour dim        = cicada::colours::sage;
+        const juce::Colour accentA    = cicada::colours::eye;          // sample A
+        const juce::Colour accentB    = cicada::colours::teal;         // sample B
+        const juce::Colour accentFx   = cicada::colours::gold;         // spectral sculpting
+        const juce::Colour lfo1       = cicada::colours::chlorophyll;
+        const juce::Colour lfo2       = cicada::colours::violet;
+        inline juce::Colour lfo (int index) { return cicada::colours::modSource (index); }
     }
 
-    /** Smoky translucent panel with an amber vein edge. */
-    void paintMembrane (juce::Graphics&, juce::Rectangle<float>, bool highlighted = false);
-
-    /** Section title with a glowing marker dot. */
-    void paintTitle (juce::Graphics&, juce::Rectangle<int> area, const juce::String& title, juce::Colour);
-
-    /** Cicada emblem in a 40 x 40 box, drawn by the editor header. */
-    void paintCicada (juce::Graphics&, juce::Rectangle<float> area);
-
-    class LookAndFeel final : public juce::LookAndFeel_V4
-    {
-    public:
-        LookAndFeel();
-
-        void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos,
-                               float startAngle, float endAngle, juce::Slider&) override;
-        void drawToggleButton (juce::Graphics&, juce::ToggleButton&, bool highlighted, bool down) override;
-        void drawComboBox (juce::Graphics&, int w, int h, bool down, int bx, int by, int bw, int bh, juce::ComboBox&) override;
-        void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool highlighted, bool down) override;
-        juce::Font getTextButtonFont (juce::TextButton&, int) override;
-        juce::Font getComboBoxFont (juce::ComboBox&) override;
-        juce::Font getLabelFont (juce::Label&) override;
-    };
+    using cicada::paintMembrane;
+    using cicada::paintTitle;
+    using cicada::paintCicada;
+    using LookAndFeel = cicada::LookAndFeel;
 
     /** A rotary knob with a caption above and its value below. Knobs that are modulation
         targets accept a dragged LFO and draw each LFO's range plus the live value. */
