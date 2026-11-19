@@ -6,7 +6,9 @@
 #   hand with "release" ticked, also publishes that package as the GitHub
 #   Release detail-clipper-v<version> (the version comes from CMakeLists.txt).
 #   The web demo's download button links to it.
-# - The macOS build runs only when started by hand with "macos" ticked.
+# - The macOS build (VST3, AU, Standalone; universal) runs for release tags, or
+#   when started by hand with "macos" ticked. When it runs, the release gets
+#   the macOS zip as well.
 
 name: Detail Clipper
 
@@ -25,7 +27,7 @@ on:
         type: boolean
         default: false
       macos:
-        description: "Also build for macOS"
+        description: "Also build for macOS (and add it to the release)"
         type: boolean
         default: false
 
@@ -79,15 +81,19 @@ jobs:
           if-no-files-found: error
 
   release:
-    if: startsWith(github.ref, 'refs/tags/detail-clipper-v') || (github.event_name == 'workflow_dispatch' && inputs.release)
-    needs: windows
+    # runs after both builds; the macOS one may be skipped (then the release is Windows only)
+    if: >-
+      always() && needs.windows.result == 'success' && needs.macos.result != 'failure' && needs.macos.result != 'cancelled' &&
+      (startsWith(github.ref, 'refs/tags/detail-clipper-v') || (github.event_name == 'workflow_dispatch' && inputs.release))
+    needs: [windows, macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: DetailClipper-Windows-x64
+          pattern: DetailClipper-*
+          merge-multiple: true
           path: dist
 
       - name: Publish release
@@ -103,11 +109,14 @@ jobs:
 
             **Windows x64:** download the zip below, unzip it and copy `Detail Clipper.vst3` into `C:\Program Files\Common Files\VST3`, then rescan plug-ins in your DAW. `Detail Clipper.exe` runs it without a DAW.
 
+            **macOS (Apple silicon and Intel), when attached:** unzip the macOS zip and follow its Install.txt. The build is not notarized, so macOS needs one Terminal command to allow it.
+
             Source: [`projects/DetailClipper`](https://github.com/${{ github.repository }}/tree/${{ github.sha }}/projects/DetailClipper). Built with JUCE (AGPLv3 / commercial licence).
 
   macos:
-    if: github.event_name == 'workflow_dispatch' && inputs.macos
-    runs-on: macos-14
+    if: >-
+      startsWith(github.ref, 'refs/tags/detail-clipper-v') || (github.event_name == 'workflow_dispatch' && inputs.macos)
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -117,17 +126,52 @@ jobs:
       - name: Build VST3, AU and Standalone
         run: cmake --build build --config Release --target DetailClipper_VST3 DetailClipper_AU DetailClipper_Standalone -- -quiet
 
-      - name: Ad-hoc sign and zip
+      - name: Sign (ad hoc), check and package
         run: |
-          cd build/DetailClipper_artefacts/Release
-          for b in "VST3/Detail Clipper.vst3" "AU/Detail Clipper.component" "Standalone/Detail Clipper.app"; do codesign --force --deep -s - "$b"; done
-          ditto -c -k --keepParent "VST3/Detail Clipper.vst3" DetailClipper-VST3.zip
-          ditto -c -k --keepParent "AU/Detail Clipper.component" DetailClipper-AU.zip
-          ditto -c -k --keepParent "Standalone/Detail Clipper.app" DetailClipper-Standalone.zip
+          v=$(sed -nE 's/^project\(DETAIL_CLIPPER VERSION ([0-9.]+)\).*/\1/p' projects/DetailClipper/CMakeLists.txt)
+          rel="build/DetailClipper_artefacts/Release"
+          out="dist/Detail Clipper $v (macOS)"
+          mkdir -p "$out"
+          cp -R "$rel/VST3/Detail Clipper.vst3" "$rel/AU/Detail Clipper.component" "$rel/Standalone/Detail Clipper.app" "$out/"
+          for b in "$out/Detail Clipper.vst3" "$out/Detail Clipper.component" "$out/Detail Clipper.app"; do
+            codesign --force --deep --sign - "$b"
+            codesign --verify --deep --strict "$b"
+            lipo -archs "$b/Contents/MacOS/Detail Clipper"
+          done
+          {
+            echo "Detail Clipper $v - macOS (Apple silicon and Intel)"
+            echo ""
+            echo "INSTALL THE PLUG-IN"
+            echo "1. Copy 'Detail Clipper.vst3' into ~/Library/Audio/Plug-Ins/VST3"
+            echo "   and, for Logic or GarageBand, 'Detail Clipper.component' into ~/Library/Audio/Plug-Ins/Components"
+            echo "   (in Finder: Go > Go to Folder..., then paste the path)."
+            echo "2. This build is not notarized by Apple, so macOS blocks it until you allow it."
+            echo "   Open Terminal and run:"
+            echo "     xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/\"Detail Clipper.vst3\" ~/Library/Audio/Plug-Ins/Components/\"Detail Clipper.component\""
+            echo "3. Rescan plug-ins in your DAW (Logic: restart it). It is listed under the maker 'Cicada'."
+            echo ""
+            echo "TRY IT WITHOUT A DAW"
+            echo "Move 'Detail Clipper.app' to Applications, then in Terminal run"
+            echo "  xattr -dr com.apple.quarantine /Applications/\"Detail Clipper.app\""
+            echo "and open it. Pick your audio device in Options > Audio/MIDI Settings."
+            echo ""
+            echo "Detail Clipper is built with JUCE (AGPLv3 / commercial licence)."
+            echo "Source: https://github.com/${{ github.repository }}/tree/${{ github.sha }}/projects/DetailClipper"
+          } > "$out/Install.txt"
+          (cd dist && ditto -c -k --sequesterRsrc --keepParent "Detail Clipper $v (macOS)" "DetailClipper-$v-macOS.zip")
+          ls -la dist
+
+      - name: Validate the AU
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "build/DetailClipper_artefacts/Release/AU/Detail Clipper.component" ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          sleep 2
+          auval -v aufx Dclp Ccda
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: DetailClipper-macOS-universal
-          path: build/DetailClipper_artefacts/Release/*.zip
+          name: DetailClipper-macOS
+          path: dist/*.zip
           if-no-files-found: error

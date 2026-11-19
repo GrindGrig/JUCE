@@ -42,9 +42,13 @@ workflow from the Actions tab with **release** ticked. The workflow creates
 the GitHub Release `detail-clipper-v<version>` with the zip attached; the web
 demo's download button links to it.
 
-The macOS build (VST3, AU, Standalone, universal) runs only when the workflow
-is started by hand from the Actions tab with **macos** ticked. It is only ad-hoc signed: on another
-Mac, right-click it and choose Open, or clear the quarantine flag.
+The macOS build (VST3, AU, Standalone, universal for Apple silicon and Intel)
+runs for release tags, or when the workflow is started by hand with **macos**
+ticked; when it runs, the release gets `DetailClipper-<version>-macOS.zip` too.
+It also runs Apple's `auval` check on the AU. The build is only ad-hoc signed,
+not notarized, so on another Mac the plug-ins need their quarantine flag
+cleared (the zip's Install.txt has the Terminal command). Notarizing needs an
+Apple Developer account.
 
 The DSP is shared with the single-file example
 `examples/Plugins/DetailClipperPluginDemo.h`.
