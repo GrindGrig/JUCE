@@ -72,8 +72,10 @@ void paintCicada (juce::Graphics&, juce::Rectangle<float> area);
 /** Fills the area with the ground colour and the faint wing-venation texture. */
 void paintVenation (juce::Graphics&, juce::Rectangle<int> area);
 
-/** Header row: emblem, wordmark, tagline and the iridescent hairline along its bottom edge. */
-void paintHeader (juce::Graphics&, juce::Rectangle<int> area, const juce::String& productName, const juce::String& tagline);
+/** Header row: emblem, wordmark, tagline and the iridescent hairline along its bottom edge.
+    The wordmark is set in capitals unless keepCase is true, for names with their own casing (TiMBAL). */
+void paintHeader (juce::Graphics&, juce::Rectangle<int> area, const juce::String& productName, const juce::String& tagline,
+                  bool keepCase = false);
 
 /** Spectrogram colour map (olive, jade, amber, pale membrane) for a level from 0 to 1. */
 juce::Colour spectrogramColour (float level);

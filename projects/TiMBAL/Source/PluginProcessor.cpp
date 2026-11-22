@@ -16,7 +16,7 @@ namespace
     juce::String times (float v)      { return juce::String::charToString (0x00d7) + juce::String (v, 2); }
 }
 
-juce::AudioProcessorValueTreeState::ParameterLayout TimbreTransferProcessor::createLayout()
+juce::AudioProcessorValueTreeState::ParameterLayout TimbalProcessor::createLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
 
@@ -42,10 +42,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout TimbreTransferProcessor::cre
 }
 
 //==============================================================================
-TimbreTransferProcessor::TimbreTransferProcessor()
+TimbalProcessor::TimbalProcessor()
     : AudioProcessor (BusesProperties().withInput ("Input", juce::AudioChannelSet::stereo(), true)
                                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      parameters (*this, nullptr, "TimbreTransfer", createLayout())
+      parameters (*this, nullptr, "TiMBAL", createLayout())
 {
     const auto get = [this] (const juce::String& id) { return parameters.getRawParameterValue (id); };
     raw = { get (ids::mode), get (ids::transpose), get (ids::autoOctave), get (ids::snap), get (ids::brightness), get (ids::noise),
@@ -55,20 +55,20 @@ TimbreTransferProcessor::TimbreTransferProcessor()
     setLatencySamples (engine.latencySamples());
 }
 
-TimbreTransferProcessor::~TimbreTransferProcessor()
+TimbalProcessor::~TimbalProcessor()
 {
     stopTimer();
     pool.removeAllJobs (true, 10000);
 }
 
-bool TimbreTransferProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool TimbalProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     const auto in = layouts.getMainInputChannelSet(), out = layouts.getMainOutputChannelSet();
     if (out != juce::AudioChannelSet::mono() && out != juce::AudioChannelSet::stereo()) return false;
     return in == juce::AudioChannelSet::mono() || in == juce::AudioChannelSet::stereo();
 }
 
-void TimbreTransferProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void TimbalProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     rate = sampleRate;
     engine.prepare (sampleRate);
@@ -92,12 +92,12 @@ void TimbreTransferProcessor::prepareToPlay (double sampleRate, int samplesPerBl
             && juce::MessageManager::getInstanceWithoutCreating()->isThisTheMessageThread())
             requestTimbre (source);
         else
-            juce::MessageManager::callAsync ([weak = juce::WeakReference<TimbreTransferProcessor> (this)]
+            juce::MessageManager::callAsync ([weak = juce::WeakReference<TimbalProcessor> (this)]
                                              { if (weak != nullptr) weak->requestTimbre (weak->source); });
     }
 }
 
-tt::Settings TimbreTransferProcessor::readSettings() const noexcept
+tt::Settings TimbalProcessor::readSettings() const noexcept
 {
     tt::Settings s;
     s.mode = (tt::Mode) juce::jlimit (0, 2, (int) raw.mode->load());
@@ -119,7 +119,7 @@ tt::Settings TimbreTransferProcessor::readSettings() const noexcept
     return s;
 }
 
-void TimbreTransferProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void TimbalProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
 
@@ -154,7 +154,7 @@ void TimbreTransferProcessor::processBlock (juce::AudioBuffer<float>& buffer, ju
 }
 
 //==============================================================================
-std::vector<float> TimbreTransferProcessor::decodeFile (const juce::File& file, double targetRate, juce::String& error)
+std::vector<float> TimbalProcessor::decodeFile (const juce::File& file, double targetRate, juce::String& error)
 {
     juce::AudioFormatManager formats;
     formats.registerBasicFormats();
@@ -202,7 +202,7 @@ std::vector<float> TimbreTransferProcessor::decodeFile (const juce::File& file, 
     return out;
 }
 
-std::unique_ptr<tt::TimbreModel> TimbreTransferProcessor::buildModel (const TimbreSource& src, double sampleRate, juce::String& error) const
+std::unique_ptr<tt::TimbreModel> TimbalProcessor::buildModel (const TimbreSource& src, double sampleRate, juce::String& error) const
 {
     if (src.builtIn >= 0)
         return tt::analyseTimbre (tt::synthesiseBuiltIn (src.builtIn, sampleRate), sampleRate, tt::builtInTimbreNames()[src.builtIn]);
@@ -214,7 +214,7 @@ std::unique_ptr<tt::TimbreModel> TimbreTransferProcessor::buildModel (const Timb
     return model;
 }
 
-void TimbreTransferProcessor::requestTimbre (const TimbreSource& src)
+void TimbalProcessor::requestTimbre (const TimbreSource& src)
 {
     source = src;
     const int gen = ++generation;
@@ -223,7 +223,7 @@ void TimbreTransferProcessor::requestTimbre (const TimbreSource& src)
     sendChangeMessage();
 
     const double sampleRate = rate;
-    pool.addJob ([this, src, gen, sampleRate, weak = juce::WeakReference<TimbreTransferProcessor> (this)]
+    pool.addJob ([this, src, gen, sampleRate, weak = juce::WeakReference<TimbalProcessor> (this)]
     {
         juce::String error;
         auto model = buildModel (src, sampleRate, error);
@@ -248,7 +248,7 @@ void TimbreTransferProcessor::requestTimbre (const TimbreSource& src)
     });
 }
 
-bool TimbreTransferProcessor::loadTimbreNow (const TimbreSource& src, double sampleRate)
+bool TimbalProcessor::loadTimbreNow (const TimbreSource& src, double sampleRate)
 {
     source = src;
     juce::String error;
@@ -259,7 +259,7 @@ bool TimbreTransferProcessor::loadTimbreNow (const TimbreSource& src, double sam
     return true;
 }
 
-void TimbreTransferProcessor::install (std::unique_ptr<tt::TimbreModel> model)
+void TimbalProcessor::install (std::unique_ptr<tt::TimbreModel> model)
 {
     // the audio thread may still be reading the old model, so it is freed a little later
     if (live != nullptr) retired.emplace_back (std::move (live), juce::Time::getMillisecondCounter());
@@ -268,14 +268,14 @@ void TimbreTransferProcessor::install (std::unique_ptr<tt::TimbreModel> model)
     if (! retired.empty()) startTimer (500);
 }
 
-void TimbreTransferProcessor::timerCallback()
+void TimbalProcessor::timerCallback()
 {
     const auto now = juce::Time::getMillisecondCounter();
     retired.erase (std::remove_if (retired.begin(), retired.end(), [now] (auto& r) { return now - r.second > 1500; }), retired.end());
     if (retired.empty()) stopTimer();
 }
 
-void TimbreTransferProcessor::resetParameters (const juce::StringArray& paramIds)
+void TimbalProcessor::resetParameters (const juce::StringArray& paramIds)
 {
     for (auto& id : paramIds)
         if (auto* p = parameters.getParameter (id))
@@ -287,7 +287,7 @@ void TimbreTransferProcessor::resetParameters (const juce::StringArray& paramIds
 }
 
 //==============================================================================
-void TimbreTransferProcessor::getStateInformation (juce::MemoryBlock& dest)
+void TimbalProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     auto state = parameters.copyState();
     state.setProperty ("timbreBuiltIn", source.builtIn, nullptr);
@@ -295,7 +295,7 @@ void TimbreTransferProcessor::getStateInformation (juce::MemoryBlock& dest)
     if (auto xml = state.createXml()) copyXmlToBinary (*xml, dest);
 }
 
-void TimbreTransferProcessor::setStateInformation (const void* data, int size)
+void TimbalProcessor::setStateInformation (const void* data, int size)
 {
     if (auto xml = getXmlFromBinary (data, size))
         if (xml->hasTagName (parameters.state.getType()))
@@ -313,6 +313,6 @@ void TimbreTransferProcessor::setStateInformation (const void* data, int size)
         }
 }
 
-juce::AudioProcessorEditor* TimbreTransferProcessor::createEditor() { return new TimbreTransferEditor (*this); }
+juce::AudioProcessorEditor* TimbalProcessor::createEditor() { return new TimbalEditor (*this); }
 
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new TimbreTransferProcessor(); }
+juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new TimbalProcessor(); }

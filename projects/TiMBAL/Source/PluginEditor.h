@@ -98,14 +98,14 @@ namespace ui
 }
 
 //==============================================================================
-class TimbreTransferEditor final : public juce::AudioProcessorEditor,
+class TimbalEditor final : public juce::AudioProcessorEditor,
                                    public juce::FileDragAndDropTarget,
                                    private juce::Timer,
                                    private juce::ChangeListener
 {
 public:
-    explicit TimbreTransferEditor (TimbreTransferProcessor&);
-    ~TimbreTransferEditor() override;
+    explicit TimbalEditor (TimbalProcessor&);
+    ~TimbalEditor() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -124,7 +124,7 @@ private:
     void browseForTimbre();
     void flash (juce::Rectangle<int>);
 
-    TimbreTransferProcessor& processor;
+    TimbalProcessor& processor;
     cicada::LookAndFeel lnf;
     juce::TooltipWindow tooltips { this, 600 };
 
@@ -165,5 +165,5 @@ private:
     juce::TextButton resetO { "RESET" }, resetAll { "RESET ALL" };
     std::unique_ptr<ui::Knob> gate, mix, gain;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TimbreTransferEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TimbalEditor)
 };

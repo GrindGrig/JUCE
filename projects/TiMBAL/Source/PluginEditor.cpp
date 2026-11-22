@@ -357,7 +357,7 @@ void SpectrogramView::paint (juce::Graphics& g)
 } // namespace ui
 
 //==============================================================================
-TimbreTransferEditor::TimbreTransferEditor (TimbreTransferProcessor& p)
+TimbalEditor::TimbalEditor (TimbalProcessor& p)
     : AudioProcessorEditor (p), processor (p), inputView (p.engine), spectrogram (p.engine)
 {
     setLookAndFeel (&lnf);
@@ -388,7 +388,7 @@ TimbreTransferEditor::TimbreTransferEditor (TimbreTransferProcessor& p)
     addAndMakeVisible (timbreStatus);
 
     // Transfer
-    const auto modes = TimbreTransferProcessor::modeNames();
+    const auto modes = TimbalProcessor::modeNames();
     for (int i = 0; i < modes.size(); ++i)
     {
         auto* b = modePills.add (new juce::ToggleButton (modes[i].toUpperCase()));
@@ -463,7 +463,7 @@ TimbreTransferEditor::TimbreTransferEditor (TimbreTransferProcessor& p)
     {
         processor.resetParameters (ids::transferSection());
         processor.resetParameters (ids::outputSection());
-        if (! (processor.getTimbreSource() == TimbreTransferProcessor::TimbreSource {})) processor.requestTimbre ({ 0, {} });
+        if (! (processor.getTimbreSource() == TimbalProcessor::TimbreSource {})) processor.requestTimbre ({ 0, {} });
         flash (getLocalBounds());
         refreshMode();
     };
@@ -476,17 +476,17 @@ TimbreTransferEditor::TimbreTransferEditor (TimbreTransferProcessor& p)
     startTimerHz (30);
 }
 
-TimbreTransferEditor::~TimbreTransferEditor()
+TimbalEditor::~TimbalEditor()
 {
     processor.removeChangeListener (this);
     setLookAndFeel (nullptr);
 }
 
 //==============================================================================
-void TimbreTransferEditor::paint (juce::Graphics& g)
+void TimbalEditor::paint (juce::Graphics& g)
 {
     cicada::paintVenation (g, getLocalBounds());
-    cicada::paintHeader (g, getLocalBounds().removeFromTop (40).reduced (margin, 0), "Timbre Transfer", "play one sound through the character of another");
+    cicada::paintHeader (g, getLocalBounds().removeFromTop (40).reduced (margin, 0), "TiMBAL", "play one sound through the character of another", true);
 
     const auto panel = [&] (juce::Rectangle<int> r, const juce::String& title, juce::Colour accent, bool highlighted)
     {
@@ -517,7 +517,7 @@ void TimbreTransferEditor::paint (juce::Graphics& g)
     }
 }
 
-void TimbreTransferEditor::resized()
+void TimbalEditor::resized()
 {
     auto area = getLocalBounds().reduced (margin, 0);
     resetAll.setBounds (getWidth() - margin - 84, 9, 84, 22);
@@ -603,7 +603,7 @@ void TimbreTransferEditor::resized()
     }
 }
 
-void TimbreTransferEditor::layoutTransferControls()
+void TimbalEditor::layoutTransferControls()
 {
     auto r = panelT.reduced (10, 8);
     r.removeFromTop (22 + 4 + 17 + 4);
@@ -620,7 +620,7 @@ void TimbreTransferEditor::layoutTransferControls()
 }
 
 //==============================================================================
-void TimbreTransferEditor::refreshMode()
+void TimbalEditor::refreshMode()
 {
     const int mode = juce::jlimit (0, 2, (int) processor.parameters.getRawParameterValue (ids::mode)->load());
     for (int i = 0; i < modePills.size(); ++i) modePills[i]->setToggleState (i == mode, juce::dontSendNotification);
@@ -629,7 +629,7 @@ void TimbreTransferEditor::refreshMode()
     layoutTransferControls();
 }
 
-void TimbreTransferEditor::refreshTimbre()
+void TimbalEditor::refreshTimbre()
 {
     const auto src = processor.getTimbreSource();
     for (int i = 0; i < presetPills.size(); ++i)
@@ -662,9 +662,9 @@ void TimbreTransferEditor::refreshTimbre()
     }
 }
 
-void TimbreTransferEditor::changeListenerCallback (juce::ChangeBroadcaster*) { refreshTimbre(); }
+void TimbalEditor::changeListenerCallback (juce::ChangeBroadcaster*) { refreshTimbre(); }
 
-void TimbreTransferEditor::timerCallback()
+void TimbalEditor::timerCallback()
 {
     const int mode = juce::jlimit (0, 2, (int) processor.parameters.getRawParameterValue (ids::mode)->load());
     if (mode != shownMode) refreshMode();
@@ -701,7 +701,7 @@ void TimbreTransferEditor::timerCallback()
     }
 }
 
-void TimbreTransferEditor::flash (juce::Rectangle<int> r)
+void TimbalEditor::flash (juce::Rectangle<int> r)
 {
     flashArea = r;
     flashAlpha = 1.0f;
@@ -709,7 +709,7 @@ void TimbreTransferEditor::flash (juce::Rectangle<int> r)
 }
 
 //==============================================================================
-void TimbreTransferEditor::browseForTimbre()
+void TimbalEditor::browseForTimbre()
 {
     chooser = std::make_unique<juce::FileChooser> ("Choose a timbre clip", juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
     chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this] (const juce::FileChooser& fc)
@@ -718,17 +718,17 @@ void TimbreTransferEditor::browseForTimbre()
     });
 }
 
-bool TimbreTransferEditor::isInterestedInFileDrag (const juce::StringArray& files)
+bool TimbalEditor::isInterestedInFileDrag (const juce::StringArray& files)
 {
     for (auto& f : files)
         if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3")) return true;
     return false;
 }
 
-void TimbreTransferEditor::fileDragEnter (const juce::StringArray&, int, int) { dragOver = true; repaint (panelB); }
-void TimbreTransferEditor::fileDragExit (const juce::StringArray&)           { dragOver = false; repaint (panelB); }
+void TimbalEditor::fileDragEnter (const juce::StringArray&, int, int) { dragOver = true; repaint (panelB); }
+void TimbalEditor::fileDragExit (const juce::StringArray&)           { dragOver = false; repaint (panelB); }
 
-void TimbreTransferEditor::filesDropped (const juce::StringArray& files, int, int)
+void TimbalEditor::filesDropped (const juce::StringArray& files, int, int)
 {
     dragOver = false;
     repaint (panelB);

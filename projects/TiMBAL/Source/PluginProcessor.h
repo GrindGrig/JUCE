@@ -17,13 +17,13 @@ namespace ids
 }
 
 /** Plays the live input (A) through the character of a timbre clip (B). */
-class TimbreTransferProcessor final : public juce::AudioProcessor,
+class TimbalProcessor final : public juce::AudioProcessor,
                                       public juce::ChangeBroadcaster,
                                       private juce::Timer
 {
 public:
-    TimbreTransferProcessor();
-    ~TimbreTransferProcessor() override;
+    TimbalProcessor();
+    ~TimbalProcessor() override;
 
     //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
@@ -108,6 +108,6 @@ private:
         std::atomic<float>* mix; std::atomic<float>* gain;
     } raw {};
 
-    JUCE_DECLARE_WEAK_REFERENCEABLE (TimbreTransferProcessor)
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TimbreTransferProcessor)
+    JUCE_DECLARE_WEAK_REFERENCEABLE (TimbalProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TimbalProcessor)
 };

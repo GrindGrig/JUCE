@@ -6,7 +6,7 @@
 #include <memory>
 #include <vector>
 
-/** DSP core of Timbre Transfer: analysis of the timbre clip (B) and the real-time
+/** DSP core of TiMBAL: analysis of the timbre clip (B) and the real-time
     transfer engine that plays the live input (A) through it.
 
     Everything here is plain C++ on top of juce_core so the offline test runner can

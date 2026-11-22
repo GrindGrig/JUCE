@@ -1,8 +1,8 @@
-// Offline checks for Timbre Transfer.
+// Offline checks for TiMBAL.
 //
-//   TimbreTransferTests                    run the DSP checks (exit code 1 on failure)
-//   TimbreTransferTests --wav <dir>        also write the input and each method's output as WAV files
-//   TimbreTransferTests --screenshot <png> render the editor after feeding it audio (needs a display, e.g. xvfb-run)
+//   TimbalTests                    run the DSP checks (exit code 1 on failure)
+//   TimbalTests --wav <dir>        also write the input and each method's output as WAV files
+//   TimbalTests --screenshot <png> render the editor after feeding it audio (needs a display, e.g. xvfb-run)
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -218,7 +218,7 @@ namespace
 
         juce::File png;
         std::function<void()> onDone;
-        TimbreTransferProcessor processor;
+        TimbalProcessor processor;
         std::unique_ptr<juce::AudioProcessorEditor> editor;
         std::vector<float> input;
         size_t pos = 0;
@@ -229,7 +229,7 @@ namespace
 class TestApp final : public juce::JUCEApplication
 {
 public:
-    const juce::String getApplicationName() override { return "TimbreTransferTests"; }
+    const juce::String getApplicationName() override { return "TimbalTests"; }
     const juce::String getApplicationVersion() override { return "1.0"; }
 
     void initialise (const juce::String&) override

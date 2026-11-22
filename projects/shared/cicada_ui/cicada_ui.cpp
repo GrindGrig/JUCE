@@ -230,18 +230,19 @@ void paintVenation (juce::Graphics& g, juce::Rectangle<int> area)
             g.fillPath (tile, juce::AffineTransform::translation ((float) x, (float) y));
 }
 
-void paintHeader (juce::Graphics& g, juce::Rectangle<int> area, const juce::String& productName, const juce::String& tagline)
+void paintHeader (juce::Graphics& g, juce::Rectangle<int> area, const juce::String& productName, const juce::String& tagline, bool keepCase)
 {
     auto row = area;
     paintCicada (g, row.removeFromLeft (28).withSizeKeepingCentre (28, 28).toFloat());
     row.removeFromLeft (8);
 
+    const auto wordmark = keepCase ? productName : productName.toUpperCase();
     const auto wordmarkFont = juce::Font (juce::FontOptions (17.0f, juce::Font::bold).withKerningFactor (0.12f));
     g.setColour (colours::ink);
     g.setFont (wordmarkFont);
-    g.drawText (productName.toUpperCase(), row, juce::Justification::centredLeft);
+    g.drawText (wordmark, row, juce::Justification::centredLeft);
 
-    const int wordmarkWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (wordmarkFont, productName.toUpperCase()));
+    const int wordmarkWidth = juce::roundToInt (juce::GlyphArrangement::getStringWidth (wordmarkFont, wordmark));
     g.setColour (colours::sage);
     g.setFont (juce::FontOptions (10.5f).withKerningFactor (0.04f));
     g.drawText (tagline, row.withTrimmedLeft (wordmarkWidth + 16), juce::Justification::centredLeft);

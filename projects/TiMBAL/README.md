@@ -1,12 +1,19 @@
-# Timbre Transfer
+# TiMBAL
 
-![Timbre Transfer](screenshot.png)
+![TiMBAL](screenshot.png)
 
-A JUCE effect plug-in (VST3 / AU / Standalone) that plays the performance of
-one sound through the character of another. Sing, hum, whistle or beatbox into
-it (**A**, the live input) and it comes out as a cello, a synth, a flute or any
-recording you give it (**B**, the timbre). It uses the shared Cicada look
-(`projects/shared/cicada_ui`), like Spectral Weaver.
+Part of **Cicada System**. A JUCE effect plug-in (VST3 / AU / Standalone)
+that plays the performance of one sound through the character of another.
+Sing, hum, whistle or beatbox into it (**A**, the live input) and it comes out
+as a cello, a synth, a flute or any recording you give it (**B**, the timbre).
+
+The name comes from the **tymbal**, the ribbed membrane a cicada buckles to
+sing; its hollow body then shapes the colour of that sound. TiMBAL does the
+same thing: your performance makes the sound, B gives it its body. The lower
+case *i* nods to *timbre*.
+
+Cicada System plug-ins are named after a part of the cicada's body or life
+cycle, and share the Cicada look (`projects/shared/cicada_ui`).
 
 ## How it works
 
@@ -56,16 +63,16 @@ cmake --build build --config Release
 The JUCE checkout two levels up is used automatically; pass
 `-DJUCE_DIR=/path/to/JUCE` to use another. On Linux, install JUCE's
 dependencies first (see `docs/Linux Dependencies.md`). Builds land in
-`build/TimbreTransfer_artefacts/<config>/`.
+`build/TiMBAL_artefacts/<config>/`.
 
 ### Tests
 
 ```bash
-cmake -B build -DTIMBRE_TRANSFER_BUILD_TESTS=ON
-cmake --build build --target TimbreTransferTests
-./build/TimbreTransferTests_artefacts/Release/TimbreTransferTests                  # DSP checks
-./build/TimbreTransferTests_artefacts/Release/TimbreTransferTests --wav out         # also write example WAVs
-xvfb-run -a ./build/TimbreTransferTests_artefacts/Release/TimbreTransferTests --screenshot screenshot.png
+cmake -B build -DTIMBAL_BUILD_TESTS=ON
+cmake --build build --target TimbalTests
+./build/TimbalTests_artefacts/Release/TimbalTests                  # DSP checks
+./build/TimbalTests_artefacts/Release/TimbalTests --wav out         # also write example WAVs
+xvfb-run -a ./build/TimbalTests_artefacts/Release/TimbalTests --screenshot screenshot.png
 ```
 
 The checks analyse every built-in timbre, run a hummed melody through all
