@@ -2,6 +2,8 @@
 
 ![TiMBAL](screenshot.png)
 
+![TiMBAL with Swap A / B on](screenshot-swapped.png)
+
 Part of **Cicada System**. A JUCE effect plug-in (VST3 / AU / Standalone)
 that plays the performance of one sound through the character of another.
 Sing, hum, whistle or beatbox into it (**A**, the live input) and it comes out
@@ -38,13 +40,35 @@ Latency is one analysis frame (2048 samples at 44.1 / 48 kHz, about 43 ms) and
 is reported to the host, so playback stays aligned. Live monitoring through
 the plug-in hears that delay.
 
+## Swap A / B
+
+Normally the audio coming into the plug-in is the performance (A) and B is a
+clip. Turn on **Swap A / B** in the header to reverse the roles, so the audio
+playing on the track becomes the timbre:
+
+- **B / Timbre · input**: TiMBAL keeps the last 6 seconds of input and
+  relearns its timbre about once a second, whenever there is input above the
+  gate. Its panel shows what it has learned and how long ago. In **Vocoder**
+  mode the input is used directly, frame by frame, as the carrier, so it
+  follows changes immediately.
+- **A / Performance · clip**: a built-in Hummed melody, Beatbox line or
+  Whistle, or any file you load or drop on panel A. It loops in time with the
+  host: it plays while the transport runs, follows the song position (read
+  ahead by the latency, so it lines up after delay compensation) and stops
+  when the transport stops. Without a transport (the Standalone app) it
+  loops freely.
+
+The B clip you chose is kept, so turning Swap off brings it back. **Mix**
+always blends against the plug-in's input.
+
 ## Controls
 
 | Section | Controls |
 |---|---|
 | **B / Timbre** | Built-in Cello, Analog synth, Flute, Brass (synthesised stand-ins), **Load file** or drop a WAV / AIFF / FLAC / OGG / MP3 (up to 30 s) on the window. The display shows B's notes and the learned envelope at three loudness levels plus its noise floor. |
 | **Transfer** | Method. *Harmonic and Mosaic:* Transpose, Octave (moves A into B's octave). *Harmonic:* Snap (pulls pitch to the nearest semitone), Brightness (how strongly loudness selects B's loud colour), Noise, Consonants, Vibrato, Glide. *Mosaic:* Grain (short or long), Continuity, Pitch fix. *Vocoder:* Detail (envelope bands), Flatten (removes B's own colour), Air. |
-| **Output** | Gate (input level below which nothing plays), Mix (dry input, delayed to match, against the result), Gain |
+| **Output** | Gate (A's level below which nothing plays), Mix (the plug-in's input, delayed to match, against the result), Gain |
+| **Header** | Swap A / B, Reset all |
 
 Double-click any knob to reset it. Each panel has a **Reset**; the header has
 **Reset all**. The timbre choice (built-in or file path) is saved with the
@@ -73,12 +97,15 @@ cmake --build build --target TimbalTests
 ./build/TimbalTests_artefacts/Release/TimbalTests                  # DSP checks
 ./build/TimbalTests_artefacts/Release/TimbalTests --wav out         # also write example WAVs
 xvfb-run -a ./build/TimbalTests_artefacts/Release/TimbalTests --screenshot screenshot.png
+xvfb-run -a ./build/TimbalTests_artefacts/Release/TimbalTests --screenshot screenshot-swapped.png --swapped
 ```
 
 The checks analyse every built-in timbre, run a hummed melody through all
 three methods and verify the output is finite, follows the input level, plays
 the input's pitch (Harmonic), is real-time capable, and that the dry path is
-delayed by exactly the reported latency.
+delayed by exactly the reported latency. With the roles swapped they check
+that the timbre is learned from the input and that the output follows the
+clip's pitch.
 
 ## Licence
 

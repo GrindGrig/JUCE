@@ -122,6 +122,10 @@ std::unique_ptr<TimbreModel> analyseTimbre (std::vector<float> mono, double samp
 juce::StringArray builtInTimbreNames();
 std::vector<float> synthesiseBuiltIn (int index, double sampleRate);
 
+/** Built-in example performances, used when the live input is the timbre. */
+juce::StringArray performanceExampleNames();
+std::vector<float> synthesisePerformance (int index, double sampleRate);
+
 //==============================================================================
 enum class Mode { harmonic = 0, mosaic, vocoder };
 
@@ -180,8 +184,12 @@ public:
     int latencySamples() const noexcept { return fftSize; }
     double getSampleRate() const noexcept { return sampleRate; }
 
-    /** Processes n samples. wet gets the transferred signal, dryDelayed the input delayed by the latency. */
-    void process (const float* in, float* wet, float* dryDelayed, int n, const Settings&, const TimbreModel*) noexcept;
+    /** Processes n samples.
+        performance: what is played (A). live: the plug-in's input, delayed into dryDelayed for the Mix control.
+        When liveCarrier is true the vocoder uses the live input itself as its carrier, frame by frame, instead
+        of the timbre model's recording (used when the input is B). wet gets the transferred signal. */
+    void process (const float* performance, const float* live, float* wet, float* dryDelayed, int n,
+                  const Settings&, const TimbreModel*, bool liveCarrier = false) noexcept;
 
     HistoryRing<Telemetry, 512> telemetry;
     HistoryRing<float, 16384> outputScope;   // wet output, for the spectrogram
@@ -192,6 +200,8 @@ private:
     void hopHarmonic (const Settings&, const TimbreModel&) noexcept;
     void hopMosaic (const Settings&, const TimbreModel&) noexcept;
     void hopVocoder (const Settings&, const TimbreModel&) noexcept;
+    void hopVocoderLive (const Settings&) noexcept;
+    void vocoderSynthesis (const Settings&, const float* carrierMags) noexcept;
     void updateBands (int count) noexcept;
     void smoothEnvelope (const float* mags, double* out) const noexcept;
     float octaveShift (const Settings&, const TimbreModel&) const noexcept;
@@ -200,7 +210,8 @@ private:
     int fftOrder = 11, fftSize = 2048, hop = 512, numBins = 1025;
     int ringSize = 8192, ringMask = 8191;
 
-    std::vector<float> inRing, acc, decRing;
+    std::vector<float> inRing, dryRing, acc, decRing, carrierMags;
+    bool useLiveCarrier = false;
     int decRingSize = 4096, decMask = 4095;
     juce::int64 samplesIn = 0;
     int hopCounter = 0, decCounter = 0;

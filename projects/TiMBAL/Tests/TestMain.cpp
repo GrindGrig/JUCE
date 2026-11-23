@@ -3,6 +3,7 @@
 //   TimbalTests                    run the DSP checks (exit code 1 on failure)
 //   TimbalTests --wav <dir>        also write the input and each method's output as WAV files
 //   TimbalTests --screenshot <png> render the editor after feeding it audio (needs a display, e.g. xvfb-run)
+//                [--swapped]                     ... with Swap A/B on: a cello on the input, the hummed melody clip performing
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -133,7 +134,7 @@ namespace
             for (size_t pos = 0; pos < input.size(); pos += 480)
             {
                 const int n = (int) juce::jmin ((size_t) 480, input.size() - pos);
-                engine.process (input.data() + pos, wet.data() + pos, dry.data() + pos, n, s, cello.get());
+                engine.process (input.data() + pos, input.data() + pos, wet.data() + pos, dry.data() + pos, n, s, cello.get());
             }
             const double ms = juce::Time::getMillisecondCounterHiRes() - t0;
             const double realtime = (double) input.size() / rate * 1000.0 / ms;
@@ -167,8 +168,54 @@ namespace
             tt::TransferEngine engine;
             engine.prepare (rate);
             std::vector<float> zeros (48000, 0.0f), wet (48000), dry (48000);
-            engine.process (zeros.data(), wet.data(), dry.data(), 48000, {}, cello.get());
+            engine.process (zeros.data(), zeros.data(), wet.data(), dry.data(), 48000, {}, cello.get());
             check (juce::exactlyEqual (rmsOf (wet), 0.0f), "silence in gives silence out");
+        }
+
+        // Swap A/B: the input (a cello) is the timbre, the hummed melody clip performs
+        std::cout << "Swapped roles (cello on the input, hummed melody clip performing)" << std::endl;
+        {
+            using Slot = TimbalProcessor::Slot;
+            const auto celloIn = tt::synthesiseBuiltIn (0, rate);
+            const auto humClip = tt::synthesisePerformance (0, rate);
+            const float humPitch = medianPitch (humClip, rate);
+
+            for (int mode : { 0, 2 })
+            {
+                TimbalProcessor processor;
+                processor.setPlayConfigDetails (2, 2, rate, 512);
+                processor.prepareToPlay (rate, 512);
+                processor.parameters.getParameter (ids::swap)->setValueNotifyingHost (1.0f);
+                processor.parameters.getParameter (ids::mode)->setValueNotifyingHost ((float) mode / 2.0f);
+                // a fixed octave, so the output pitch can be compared with the clip's
+                processor.parameters.getParameter (ids::autoOctave)->setValueNotifyingHost (0.0f);
+                check (processor.loadClipNow (Slot::performanceClip, { 0, {} }, rate), "performance clip loads");
+
+                juce::AudioBuffer<float> buffer (2, 512);
+                juce::MidiBuffer midi;
+                std::vector<float> out;
+                bool learned = false;
+                for (size_t pos = 0; pos + 512 <= celloIn.size(); pos += 512)
+                {
+                    for (int c = 0; c < 2; ++c) buffer.copyFrom (c, 0, celloIn.data() + pos, 512);
+                    processor.processBlock (buffer, midi);
+                    if (! learned && pos >= (size_t) (rate * 6.0)) learned = processor.learnFromInputNow();
+                    if (learned) out.insert (out.end(), buffer.getReadPointer (0), buffer.getReadPointer (0) + 512);
+                }
+
+                const auto* live = processor.getModel (Slot::liveTimbre);
+                bool finite = true;
+                for (auto v : out) finite = finite && std::isfinite (v);
+                check (learned && live != nullptr && live->hasPitch, "the timbre is learned from the input");
+                check (finite && rmsOf (out) > 0.01f, juce::String (mode == 0 ? "harmonic" : "vocoder") + " output with swapped roles is audible and finite");
+
+                if (mode == 0)
+                {
+                    const float outPitch = medianPitch (out, rate), expected = humPitch + (float) processor.engine.appliedShift.load();
+                    check (std::abs (outPitch - expected) < 0.6f, "swapped output plays the clip's pitch (" + juce::String (outPitch, 1) + " vs " + juce::String (expected, 1) + ")");
+                    if (wavDir != juce::File()) writeWav (wavDir.getChildFile ("swapped-hum-clip-through-live-cello.wav"), out, rate);
+                }
+            }
         }
 
         std::cout << (failures == 0 ? "All checks passed" : juce::String (failures) + " check(s) failed") << std::endl;
@@ -180,13 +227,18 @@ namespace
     class ScreenshotRun final : private juce::Timer
     {
     public:
-        ScreenshotRun (const juce::File& file, std::function<void()> done) : png (file), onDone (std::move (done))
+        ScreenshotRun (const juce::File& file, bool swappedRoles, std::function<void()> done)
+            : png (file), onDone (std::move (done)), swapped (swappedRoles)
         {
+            using Slot = TimbalProcessor::Slot;
             processor.setPlayConfigDetails (2, 2, rate, 512);
             processor.prepareToPlay (rate, 512);
-            processor.loadTimbreNow ({ 0, {} }, rate);
+            processor.loadClipNow (Slot::timbreClip, { 0, {} }, rate);
+            processor.loadClipNow (Slot::performanceClip, { 0, {} }, rate);
+            if (swapped) processor.parameters.getParameter (ids::swap)->setValueNotifyingHost (1.0f);
             editor.reset (processor.createEditorAndMakeActive());
-            input = hummedMelody (rate);
+            // normally a hummed melody is the input; swapped, a cello is the input and the hum is the clip
+            input = swapped ? tt::synthesiseBuiltIn (0, rate) : hummedMelody (rate);
             startTimer (10);
         }
 
@@ -203,7 +255,8 @@ namespace
                 pos += 512;
             }
 
-            if (rounds < 2) return;
+            if (swapped && ! learned && pos > (size_t) (rate * 6.0)) learned = processor.learnFromInputNow();
+            if (rounds < (swapped ? 1 : 2)) return;
             if (++settle < 15) return;   // let the editor's 30 Hz timer catch up
 
             stopTimer();
@@ -223,6 +276,7 @@ namespace
         std::vector<float> input;
         size_t pos = 0;
         int rounds = 0, settle = 0;
+        bool swapped = false, learned = false;
     };
 }
 
@@ -245,7 +299,7 @@ public:
 
         if (shot != juce::File())
         {
-            screenshot = std::make_unique<ScreenshotRun> (shot, [this] { quit(); });
+            screenshot = std::make_unique<ScreenshotRun> (shot, args.contains ("--swapped"), [this] { quit(); });
             return;
         }
 

@@ -364,10 +364,34 @@ TimbalEditor::TimbalEditor (TimbalProcessor& p)
     auto& state = processor.parameters;
     using namespace ui::roles;
 
+    using Slot = TimbalProcessor::Slot;
+
+    // header: who plays and who gives the colour
+    setupPill (swapToggle, C::ink);
+    swapToggle.setClickingTogglesState (true);
+    swapToggle.setTooltip ("Swap the roles: the plug-in's input becomes the timbre (B), and A plays from a clip in time with your host");
+    swapAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (state, ids::swap, swapToggle);
+    addAndMakeVisible (swapToggle);
+
     // A
     addAndMakeVisible (inputView);
     setupStatus (inputStatus);
     addAndMakeVisible (inputStatus);
+    const auto performances = TimbalProcessor::exampleNames (Slot::performanceClip);
+    for (int i = 0; i < performances.size(); ++i)
+    {
+        auto* b = performancePills.add (new juce::ToggleButton (performances[i].toUpperCase()));
+        setupPill (*b, performance);
+        b->setTooltip ("Play the built-in " + performances[i].toLowerCase() + " as the performance");
+        b->onClick = [this, i] { processor.requestClip (Slot::performanceClip, { i, {} }); };
+        addChildComponent (b);
+    }
+    setupTextButton (loadA, performance, "Load an audio file to perform (or drop one on this panel)");
+    loadA.onClick = [this] { browseFor (Slot::performanceClip); };
+    setupTextButton (resetA, performance, "Go back to the built-in hummed melody");
+    resetA.onClick = [this] { flash (panelA); processor.requestClip (Slot::performanceClip, { 0, {} }); };
+    addChildComponent (loadA);
+    addChildComponent (resetA);
 
     // B
     const auto names = tt::builtInTimbreNames();
@@ -376,13 +400,13 @@ TimbalEditor::TimbalEditor (TimbalProcessor& p)
         auto* b = presetPills.add (new juce::ToggleButton (names[i].toUpperCase()));
         setupPill (*b, timbre);
         b->setTooltip ("Use the built-in " + names[i].toLowerCase() + " example as the timbre");
-        b->onClick = [this, i] { processor.requestTimbre ({ i, {} }); };
+        b->onClick = [this, i] { processor.requestClip (Slot::timbreClip, { i, {} }); };
         addAndMakeVisible (b);
     }
     setupTextButton (loadButton, timbre, "Load an audio file as the timbre (or drop one on this panel)");
-    loadButton.onClick = [this] { browseForTimbre(); };
+    loadButton.onClick = [this] { browseFor (Slot::timbreClip); };
     setupTextButton (resetB, timbre, "Go back to the built-in cello");
-    resetB.onClick = [this] { flash (panelB); processor.requestTimbre ({ 0, {} }); };
+    resetB.onClick = [this] { flash (panelB); processor.requestClip (Slot::timbreClip, { 0, {} }); };
     for (auto* c : std::initializer_list<juce::Component*> { &loadButton, &resetB, &timbreView, &fingerprint }) addAndMakeVisible (c);
     setupStatus (timbreStatus);
     addAndMakeVisible (timbreStatus);
@@ -457,13 +481,14 @@ TimbalEditor::TimbalEditor (TimbalProcessor& p)
     setupTextButton (resetO, output, "Reset gate, mix and gain");
     resetO.onClick = [this] { flash (panelO); processor.resetParameters (ids::outputSection()); };
 
-    setupTextButton (resetAll, C::eye, "Reset every control and go back to the built-in cello");
+    setupTextButton (resetAll, C::eye, "Reset every control and go back to the built-in examples (Swap A / B stays as it is)");
     resetAll.setColour (juce::TextButton::textColourOffId, C::ink);
     resetAll.onClick = [this]
     {
         processor.resetParameters (ids::transferSection());
         processor.resetParameters (ids::outputSection());
-        if (! (processor.getTimbreSource() == TimbalProcessor::TimbreSource {})) processor.requestTimbre ({ 0, {} });
+        for (auto slot : { Slot::timbreClip, Slot::performanceClip })
+            if (! (processor.getSource (slot) == TimbalProcessor::ClipSource {})) processor.requestClip (slot, { 0, {} });
         flash (getLocalBounds());
         refreshMode();
     };
@@ -471,7 +496,7 @@ TimbalEditor::TimbalEditor (TimbalProcessor& p)
 
     processor.addChangeListener (this);
     setSize (windowW, windowH);
-    refreshTimbre();
+    applySwapLayout();
     refreshMode();
     startTimerHz (30);
 }
@@ -493,8 +518,10 @@ void TimbalEditor::paint (juce::Graphics& g)
         cicada::paintMembrane (g, r.toFloat(), highlighted);
         cicada::paintTitle (g, r.reduced (10, 5).removeFromTop (18), title.toUpperCase(), accent);
     };
-    panel (panelA, "A / Performance", ui::roles::performance, false);
-    panel (panelB, "B / Timbre", ui::roles::timbre, dragOver);
+    const bool swapped = processor.isSwapped();
+    const auto dot = "  " + juce::String::charToString (0x00b7) + "  ";
+    panel (panelA, "A / Performance" + dot + (swapped ? "clip" : "input"), ui::roles::performance, dragOver && swapped);
+    panel (panelB, "B / Timbre" + dot + (swapped ? "input" : "clip"), ui::roles::timbre, dragOver && ! swapped);
     panel (panelT, "Transfer", ui::roles::transfer, false);
     panel (panelO, "Output", ui::roles::output, false);
 
@@ -521,6 +548,17 @@ void TimbalEditor::resized()
 {
     auto area = getLocalBounds().reduced (margin, 0);
     resetAll.setBounds (getWidth() - margin - 84, 9, 84, 22);
+    swapToggle.setBounds (resetAll.getX() - 8 - 104, 9, 104, 22);
+    const bool swapped = processor.isSwapped();
+    const auto layoutPills = [] (juce::OwnedArray<juce::ToggleButton>& pills, juce::Rectangle<int> row)
+    {
+        for (auto* b : pills)
+        {
+            const int w = juce::roundToInt (juce::GlyphArrangement::getStringWidth (ui::labelFont().withHeight (10.0f), b->getButtonText())) + 26;
+            b->setBounds (row.removeFromLeft (w));
+            row.removeFromLeft (4);
+        }
+    };
     area.removeFromTop (40 + gap);
 
     auto top = area.removeFromTop (204);
@@ -535,7 +573,16 @@ void TimbalEditor::resized()
     // A
     {
         auto r = panelA.reduced (10, 8);
-        r.removeFromTop (22);
+        auto head = r.removeFromTop (22).withTrimmedLeft (230);
+        resetA.setBounds (head.removeFromRight (54));
+        head.removeFromRight (6);
+        loadA.setBounds (head.removeFromRight (76));
+        if (swapped)
+        {
+            r.removeFromTop (4);
+            layoutPills (performancePills, r.removeFromTop (22));
+            r.removeFromTop (6);
+        }
         inputStatus.setBounds (r.removeFromBottom (14));
         r.removeFromBottom (4);
         inputView.setBounds (r);
@@ -544,20 +591,16 @@ void TimbalEditor::resized()
     // B
     {
         auto r = panelB.reduced (10, 8);
-        auto head = r.removeFromTop (22).withTrimmedLeft (110);
+        auto head = r.removeFromTop (22).withTrimmedLeft (200);
         resetB.setBounds (head.removeFromRight (54));
         head.removeFromRight (6);
         loadButton.setBounds (head.removeFromRight (76));
         r.removeFromTop (4);
-
-        auto pills = r.removeFromTop (22);
-        for (auto* b : presetPills)
+        if (! swapped)
         {
-            const int w = juce::roundToInt (juce::GlyphArrangement::getStringWidth (ui::labelFont().withHeight (10.0f), b->getButtonText())) + 26;
-            b->setBounds (pills.removeFromLeft (w));
-            pills.removeFromLeft (4);
+            layoutPills (presetPills, r.removeFromTop (22));
+            r.removeFromTop (6);
         }
-        r.removeFromTop (6);
         timbreStatus.setBounds (r.removeFromBottom (14));
         r.removeFromBottom (4);
         const int h = (r.getHeight() - 4) / 2;
@@ -629,13 +672,33 @@ void TimbalEditor::refreshMode()
     layoutTransferControls();
 }
 
-void TimbalEditor::refreshTimbre()
+void TimbalEditor::applySwapLayout()
 {
-    const auto src = processor.getTimbreSource();
-    for (int i = 0; i < presetPills.size(); ++i)
-        presetPills[i]->setToggleState (src.builtIn == i, juce::dontSendNotification);
+    const bool swapped = processor.isSwapped();
+    shownSwap = swapped;
+    for (auto* b : performancePills) b->setVisible (swapped);
+    loadA.setVisible (swapped);
+    resetA.setVisible (swapped);
+    for (auto* b : presetPills) b->setVisible (! swapped);
+    loadButton.setVisible (! swapped);
+    resetB.setVisible (! swapped);
+    resized();
+    refreshSources();
+    repaint();
+}
 
-    const auto* model = processor.getTimbre();
+juce::Rectangle<int> TimbalEditor::clipPanel() const { return processor.isSwapped() ? panelA : panelB; }
+
+void TimbalEditor::refreshSources()
+{
+    using Slot = TimbalProcessor::Slot;
+    const bool swapped = processor.isSwapped();
+
+    const auto timbreSrc = processor.getSource (Slot::timbreClip), performanceSrc = processor.getSource (Slot::performanceClip);
+    for (int i = 0; i < presetPills.size(); ++i)      presetPills[i]->setToggleState (timbreSrc.builtIn == i, juce::dontSendNotification);
+    for (int i = 0; i < performancePills.size(); ++i) performancePills[i]->setToggleState (performanceSrc.builtIn == i, juce::dontSendNotification);
+
+    const auto* model = processor.getActiveTimbre();
     if (model != shownModel)
     {
         shownModel = model;
@@ -643,32 +706,52 @@ void TimbalEditor::refreshTimbre()
         fingerprint.setModel (model);
     }
 
-    if (processor.isLoadingTimbre())
+    const auto describe = [] (const tt::TimbreModel& m)
+    {
+        return m.hasPitch ? " | range " + noteName (m.lowMidi) + "-" + noteName (m.highMidi) : juce::String (" | no steady pitch, using its average spectrum");
+    };
+
+    if (swapped)
+    {
+        if (model == nullptr)
+        {
+            timbreStatus.setColour (juce::Label::textColourId, ui::roles::transfer);
+            timbreStatus.setText ("Listening: play audio into the plug-in to set the timbre", juce::dontSendNotification);
+        }
+        else
+        {
+            timbreStatus.setColour (juce::Label::textColourId, C::sage);
+            const double age = juce::jmax (0.0, processor.secondsSinceLiveLearn());
+            timbreStatus.setText ("Learning from the input | updated " + juce::String (age, 1) + " s ago" + describe (*model), juce::dontSendNotification);
+        }
+        return;
+    }
+
+    if (processor.isLoading (Slot::timbreClip))
     {
         timbreStatus.setColour (juce::Label::textColourId, ui::roles::transfer);
-        timbreStatus.setText ("Analysing " + (src.builtIn >= 0 ? tt::builtInTimbreNames()[src.builtIn] : src.file.getFileName()) + "...", juce::dontSendNotification);
+        timbreStatus.setText ("Analysing " + (timbreSrc.builtIn >= 0 ? tt::builtInTimbreNames()[timbreSrc.builtIn] : timbreSrc.file.getFileName()) + "...", juce::dontSendNotification);
     }
-    else if (processor.getTimbreError().isNotEmpty())
+    else if (processor.getError (Slot::timbreClip).isNotEmpty())
     {
         timbreStatus.setColour (juce::Label::textColourId, C::eye);
-        timbreStatus.setText (processor.getTimbreError(), juce::dontSendNotification);
+        timbreStatus.setText (processor.getError (Slot::timbreClip), juce::dontSendNotification);
     }
     else if (model != nullptr)
     {
         timbreStatus.setColour (juce::Label::textColourId, C::sage);
-        juce::String s = model->name + " | " + juce::String (model->durationSeconds(), 2) + " s";
-        s << (model->hasPitch ? " | range " + noteName (model->lowMidi) + "-" + noteName (model->highMidi) : " | no steady pitch, using its average spectrum");
-        timbreStatus.setText (s, juce::dontSendNotification);
+        timbreStatus.setText (model->name + " | " + juce::String (model->durationSeconds(), 2) + " s" + describe (*model), juce::dontSendNotification);
     }
 }
 
-void TimbalEditor::changeListenerCallback (juce::ChangeBroadcaster*) { refreshTimbre(); }
+void TimbalEditor::changeListenerCallback (juce::ChangeBroadcaster*) { refreshSources(); }
 
 void TimbalEditor::timerCallback()
 {
     const int mode = juce::jlimit (0, 2, (int) processor.parameters.getRawParameterValue (ids::mode)->load());
     if (mode != shownMode) refreshMode();
-    if (processor.getTimbre() != shownModel) refreshTimbre();
+    if (processor.isSwapped() != shownSwap) applySwapLayout();
+    if (processor.getActiveTimbre() != shownModel || (shownSwap && ++statusTicks % 15 == 0)) refreshSources();
 
     inputView.repaint();
     spectrogram.update();
@@ -686,7 +769,30 @@ void TimbalEditor::timerCallback()
         }
         else s << (t.loudnessDb > processor.parameters.getRawParameterValue (ids::gate)->load() ? "no pitch" : "below gate");
         s << " | " << juce::String (t.loudnessDb, 1) << " dB";
+        inputStatus.setColour (juce::Label::textColourId, C::sage);
         inputStatus.setText (s, juce::dontSendNotification);
+    }
+
+    if (shownSwap)
+    {
+        // A is a clip: say which, and whether it is playing
+        using Slot = TimbalProcessor::Slot;
+        const auto* clip = processor.getModel (Slot::performanceClip);
+        if (processor.isLoading (Slot::performanceClip))
+            inputStatus.setText ("Loading the performance clip...", juce::dontSendNotification);
+        else if (processor.getError (Slot::performanceClip).isNotEmpty())
+        {
+            inputStatus.setColour (juce::Label::textColourId, C::eye);
+            inputStatus.setText (processor.getError (Slot::performanceClip), juce::dontSendNotification);
+        }
+        else if (clip != nullptr)
+        {
+            const float pos = processor.getPerformancePosition();
+            inputStatus.setText (clip->name + " | " + (pos < 0.0f ? juce::String ("start playback in your host")
+                                                                   : juce::String (pos * clip->durationSeconds(), 1) + " / " + juce::String (clip->durationSeconds(), 1) + " s")
+                                 + (written > 0 && pos >= 0.0f ? " | " + inputStatus.getText().upToFirstOccurrenceOf (" |", false, false) : juce::String()),
+                                 juce::dontSendNotification);
+        }
     }
 
     const int shift = processor.engine.appliedShift.load();
@@ -709,12 +815,13 @@ void TimbalEditor::flash (juce::Rectangle<int> r)
 }
 
 //==============================================================================
-void TimbalEditor::browseForTimbre()
+void TimbalEditor::browseFor (TimbalProcessor::Slot slot)
 {
-    chooser = std::make_unique<juce::FileChooser> ("Choose a timbre clip", juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
-    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this] (const juce::FileChooser& fc)
+    const bool performance = slot == TimbalProcessor::Slot::performanceClip;
+    chooser = std::make_unique<juce::FileChooser> (performance ? "Choose a clip to perform" : "Choose a timbre clip", juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this, slot] (const juce::FileChooser& fc)
     {
-        if (fc.getResult().existsAsFile()) processor.requestTimbre ({ -1, fc.getResult() });
+        if (fc.getResult().existsAsFile()) processor.requestClip (slot, { -1, fc.getResult() });
     });
 }
 
@@ -725,13 +832,15 @@ bool TimbalEditor::isInterestedInFileDrag (const juce::StringArray& files)
     return false;
 }
 
-void TimbalEditor::fileDragEnter (const juce::StringArray&, int, int) { dragOver = true; repaint (panelB); }
-void TimbalEditor::fileDragExit (const juce::StringArray&)           { dragOver = false; repaint (panelB); }
+void TimbalEditor::fileDragEnter (const juce::StringArray&, int, int) { dragOver = true; repaint (clipPanel()); }
+void TimbalEditor::fileDragExit (const juce::StringArray&)           { dragOver = false; repaint (clipPanel()); }
 
 void TimbalEditor::filesDropped (const juce::StringArray& files, int, int)
 {
     dragOver = false;
-    repaint (panelB);
+    repaint (clipPanel());
+    // the file goes to whichever side is a clip: B normally, A when swapped
+    const auto slot = processor.isSwapped() ? TimbalProcessor::Slot::performanceClip : TimbalProcessor::Slot::timbreClip;
     for (auto& f : files)
-        if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3")) { processor.requestTimbre ({ -1, juce::File (f) }); break; }
+        if (juce::File (f).hasFileExtension ("wav;aif;aiff;flac;ogg;mp3")) { processor.requestClip (slot, { -1, juce::File (f) }); break; }
 }

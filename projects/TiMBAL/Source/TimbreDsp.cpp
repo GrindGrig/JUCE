@@ -707,6 +707,127 @@ std::vector<float> synthesiseBuiltIn (int index, double sr)
 }
 
 //==============================================================================
+// Example performances (for when the live input is the timbre), as in the web version.
+namespace
+{
+    constexpr float vowels[5][3] = { { 730, 1090, 2440 }, { 570, 840, 2410 }, { 300, 870, 2240 }, { 530, 1840, 2480 }, { 270, 2290, 3010 } };
+
+    /** Harmonic amplitudes of a hummed voice: glottal slope through three vowel formants. */
+    void voiceAmps (const Sequence& sq, size_t n, float* A, int K, int vowel, double sr)
+    {
+        const float f = sq.f0[n], e = sq.env[n], d = sq.dyn[n], tilt = 1.55f - 0.55f * d;
+        const float* F = vowels[vowel % 5];
+        for (int k = 1; k <= K; ++k)
+        {
+            const float fk = (float) k * f;
+            if (fk > sr * 0.46 || juce::exactlyEqual (e, 0.0f)) { A[k - 1] = 0.0f; continue; }
+            A[k - 1] = e * (0.35f + 0.65f * d) * std::pow ((float) k, -tilt)
+                     * (0.04f + res (fk, F[0], 90) + 0.55f * res (fk, F[1], 120) + 0.3f * res (fk, F[2], 180));
+        }
+    }
+
+    std::vector<float> makeHum (double sr)
+    {
+        const std::vector<Note> notes { { 57, .42f, .5f }, { 60, .42f, .6f }, { 62, .42f, .7f }, { 64, .8f, .9f }, { -1, .18f, 0 }, { 64, .32f, .6f },
+                                        { 62, .32f, .55f }, { 60, .32f, .5f }, { 59, .42f, .55f }, { 57, .95f, .75f }, { -1, .35f, 0 },
+                                        { 55, .42f, .5f }, { 57, .42f, .6f }, { 60, .42f, .75f }, { 64, .55f, .9f }, { 65, .42f, 1.0f },
+                                        { 64, .42f, .8f }, { 62, .42f, .65f }, { 60, 1.1f, .7f } };
+        const auto sq = makeSequence (notes, { .06f, .1f, .035f, .3f, 5.2f, false, .04f, 3 }, sr);
+        // vowel per note, following the note boundaries
+        std::vector<int> vowelAt (sq.len, 0);
+        {
+            const int pattern[] = { 0, 1, 0, 4, 0, 1, 2, 0, 1, 2, 0, 0, 1, 0, 3, 0, 1, 0, 2 };
+            double t = 0.0;
+            for (size_t k = 0; k < notes.size(); ++k)
+            {
+                const size_t s0 = (size_t) (t * sr), s1 = juce::jmin (sq.len, (size_t) ((t + notes[k].dur) * sr));
+                for (size_t i = s0; i < s1; ++i) vowelAt[i] = pattern[k];
+                t += notes[k].dur;
+            }
+        }
+        const auto h = additive (sq, 48, [&] (size_t n, float* A) { voiceAmps (sq, n, A, 48, vowelAt[n], sr); }, sr);
+        const auto br = shapedNoise (sq, biquad (whiteNoise (sq.len, 11), Bq::highpass, 1800, .7, sr), [&] (size_t i) { return sq.env[i] * (0.4f + 0.6f * sq.dyn[i]); });
+        return mixNormalised ({ { &h, 1.0f }, { &br, 0.025f } });
+    }
+
+    std::vector<float> makeBeatbox (double sr)
+    {
+        const double step = 0.15;
+        const int bars = 4;
+        const size_t len = (size_t) ((bars * 16 * step + 0.4) * sr);
+        std::vector<float> out (len, 0.0f);
+        const auto snareNoise = biquad (biquad (whiteNoise (len, 5), Bq::bandpass, 1900, .8, sr), Bq::highpass, 700, .7, sr);
+        const auto hatNoise = biquad (whiteNoise (len, 9), Bq::highpass, 6500, .7, sr);
+        const auto hit = [&] (double t0, double dur, auto&& fn)
+        {
+            const size_t s0 = (size_t) std::lround (t0 * sr);
+            for (size_t s = 0; s < (size_t) (dur * sr) && s0 + s < len; ++s) out[s0 + s] += fn ((float) ((double) s / sr), s0 + s);
+        };
+
+        std::vector<Note> hum;
+        const float bass[4][4] = { { 40, 40, 43, 45 }, { 40, 40, 47, 45 }, { 40, 40, 43, 45 }, { 38, 40, 43, 43 } };
+        const double humSteps[4][2] = { { 1, 1 }, { 5, 1.5 }, { 9, 1 }, { 13, 1.6 } };
+        double tPrev = 0.0;
+
+        for (int b = 0; b < bars; ++b)
+        {
+            const double T0 = b * 16 * step;
+            for (int s : { 0, 8, 11 })
+            {
+                double ph = 0.0;
+                hit (T0 + s * step, .2, [&] (float a, size_t) {
+                    ph += twoPi * (52.0 + 110.0 * std::exp (-a / .028)) / sr;
+                    return 0.95f * (float) std::sin (ph) * std::exp (-a / .075f) * juce::jmin (1.0f, a / .002f); });
+            }
+            for (int s : { 4, 12 })
+                hit (T0 + s * step, .2, [&] (float a, size_t i) { return snareNoise[i] * 2.4f * std::exp (-a / .055f) + 0.25f * (float) std::sin (twoPi * 185.0 * a) * std::exp (-a / .03f); });
+            for (int s : { 2, 6, 10, 14, 15 })
+                hit (T0 + s * step, .06, [&] (float a, size_t i) { return hatNoise[i] * 1.5f * std::exp (-a / .014f); });
+
+            for (int k = 0; k < 4; ++k)
+            {
+                const double st = T0 + humSteps[k][0] * step;
+                if (st > tPrev) hum.push_back ({ -1.0f, (float) (st - tPrev), 0.0f });
+                hum.push_back ({ bass[b][k], (float) (humSteps[k][1] * step), 0.75f });
+                tPrev = st + humSteps[k][1] * step;
+            }
+        }
+
+        auto sq = makeSequence (hum, { .02f, .05f, .01f, 0.0f, 5.5f, false, .02f, 4 }, sr);
+        const auto h = additive (sq, 40, [&] (size_t n, float* A) { voiceAmps (sq, n, A, 40, 2, sr); }, sr);
+        for (size_t i = 0; i < len && i < h.size(); ++i) out[i] += h[i] * 1.6f;
+        return mixNormalised ({ { &out, 1.0f } });
+    }
+
+    std::vector<float> makeWhistle (double sr)
+    {
+        const std::vector<Note> notes { { 79, .35f, .6f }, { 83, .35f, .7f }, { 86, .7f, .9f }, { 84, .25f, .6f }, { 83, .25f, .6f }, { 81, .5f, .7f },
+                                        { -1, .2f, 0 }, { 79, .3f, .6f }, { 81, .3f, .65f }, { 83, .3f, .7f }, { 88, .8f, 1.0f }, { 86, .3f, .8f },
+                                        { 84, .3f, .7f }, { 83, .9f, .7f } };
+        const auto sq = makeSequence (notes, { .04f, .07f, .045f, .35f, 4.6f, false, .02f, 8 }, sr);
+        const auto h = additive (sq, 3, [&] (size_t n, float* A)
+        {
+            const float e = sq.env[n], d = sq.dyn[n];
+            A[0] = e * (0.4f + 0.6f * d); A[1] = e * 0.03f * d; A[2] = e * 0.008f;
+        }, sr);
+        const auto br = shapedNoise (sq, biquad (whiteNoise (sq.len, 21), Bq::bandpass, 3200, .6, sr), [&] (size_t i) { return sq.env[i]; });
+        return mixNormalised ({ { &h, 1.0f }, { &br, 0.05f } });
+    }
+}
+
+juce::StringArray performanceExampleNames() { return { "Hummed melody", "Beatbox line", "Whistle" }; }
+
+std::vector<float> synthesisePerformance (int index, double sr)
+{
+    switch (index)
+    {
+        case 1:  return makeBeatbox (sr);
+        case 2:  return makeWhistle (sr);
+        default: return makeHum (sr);
+    }
+}
+
+//==============================================================================
 TransferEngine::TransferEngine() { prepare (44100.0); }
 
 void TransferEngine::prepare (double rate)
@@ -727,6 +848,8 @@ void TransferEngine::prepare (double rate)
     decMask = decRingSize - 1;
 
     inRing.assign ((size_t) ringSize, 0.0f);
+    dryRing.assign ((size_t) ringSize, 0.0f);
+    carrierMags.assign ((size_t) numBins, 0.0f);
     acc.assign ((size_t) ringSize, 0.0f);
     decRing.assign ((size_t) decRingSize, 0.0f);
     hann = periodicHann (fftSize);
@@ -750,6 +873,7 @@ void TransferEngine::prepare (double rate)
 void TransferEngine::reset()
 {
     std::fill (inRing.begin(), inRing.end(), 0.0f);
+    std::fill (dryRing.begin(), dryRing.end(), 0.0f);
     std::fill (acc.begin(), acc.end(), 0.0f);
     std::fill (decRing.begin(), decRing.end(), 0.0f);
     samplesIn = 0; hopCounter = 0; decCounter = 0; decSum = 0.0f; decWritten = 0;
@@ -758,8 +882,10 @@ void TransferEngine::reset()
     phase = vibPhase = 0.0; previousGrain = -1; vocoderStep = 0;
 }
 
-void TransferEngine::process (const float* in, float* wet, float* dryDelayed, int n, const Settings& s, const TimbreModel* model) noexcept
+void TransferEngine::process (const float* in, const float* live, float* wet, float* dryDelayed, int n,
+                              const Settings& s, const TimbreModel* model, bool liveCarrier) noexcept
 {
+    useLiveCarrier = liveCarrier;
     const int D = pitch.decimation;
     int scopeWrite = outputScope.written.load (std::memory_order_relaxed);
 
@@ -767,6 +893,7 @@ void TransferEngine::process (const float* in, float* wet, float* dryDelayed, in
     {
         const float x = in[i];
         inRing[(size_t) (samplesIn & ringMask)] = x;
+        dryRing[(size_t) (samplesIn & ringMask)] = live[i];
 
         decSum += x;
         if (++decCounter == D)
@@ -788,7 +915,7 @@ void TransferEngine::process (const float* in, float* wet, float* dryDelayed, in
         const auto idx = (size_t) (content & ringMask);
         wet[i] = acc[idx];
         acc[idx] = 0.0f;
-        dryDelayed[i] = content >= 0 ? inRing[idx] : 0.0f;
+        dryDelayed[i] = content >= 0 ? dryRing[idx] : 0.0f;
 
         outputScope.items[(size_t) (scopeWrite % (int) outputScope.items.size())] = wet[i];
         ++scopeWrite;
@@ -801,7 +928,13 @@ float TransferEngine::octaveShift (const Settings& s, const TimbreModel& M) cons
 {
     if (! s.autoOctave || ! M.hasPitch || ! haveAverage)
         return 0.0f;
-    return 12.0f * std::round ((M.medianMidi - (srcAverage + s.transpose)) / 12.0f);
+
+    // keep the current octave unless the performance sits clearly outside the timbre's range;
+    // a live timbre's range drifts as it is relearned, and octave jumps between phrases sound wrong
+    const float misfit = M.medianMidi - (srcAverage + s.transpose);
+    if (std::abs (misfit - currentOctave) <= 8.0f)
+        return currentOctave;
+    return 12.0f * std::round (misfit / 12.0f);
 }
 
 void TransferEngine::runHop (const Settings& s, const TimbreModel* model) noexcept
@@ -855,7 +988,11 @@ void TransferEngine::runHop (const Settings& s, const TimbreModel* model) noexce
 
     float playedMidi = 0.0f;
 
-    if (model != nullptr)
+    if (s.mode == Mode::vocoder && useLiveCarrier)
+    {
+        hopVocoderLive (s);
+    }
+    else if (model != nullptr)
     {
         const bool sameGrid = juce::exactlyEqual (model->sampleRate, sampleRate) && model->fftSize == fftSize && ! model->active.empty();
 
@@ -1080,7 +1217,6 @@ void TransferEngine::hopVocoder (const Settings& s, const TimbreModel& M) noexce
 {
     if (! hopAbove) return;
 
-    const juce::int64 n = samplesIn;
     updateBands (s.bands);
     smoothEnvelope (mags.data(), envA.data());
 
@@ -1095,7 +1231,38 @@ void TransferEngine::hopVocoder (const Settings& s, const TimbreModel& M) noexce
     }
     fft->perform (re2.data(), im2.data(), false);
 
-    const float* tm = M.frameMags (j);
+    vocoderSynthesis (s, M.frameMags (j));
+}
+
+void TransferEngine::hopVocoderLive (const Settings& s) noexcept
+{
+    if (! hopAbove) return;
+
+    // the carrier is the live input's current frame (the same frame span as the performance frame)
+    const juce::int64 n = samplesIn;
+    double energy = 0.0;
+    for (int k = 0; k < fftSize; ++k)
+    {
+        const double v = dryRing[(size_t) ((n - fftSize + k) & ringMask)];
+        energy += v * v;
+        re2[(size_t) k] = v * hann[(size_t) k];
+        im2[(size_t) k] = 0.0;
+    }
+    if (energy / fftSize < 1.0e-10) return;
+
+    fft->perform (re2.data(), im2.data(), false);
+    for (int b = 0; b < numBins; ++b)
+        carrierMags[(size_t) b] = (float) std::sqrt (re2[(size_t) b] * re2[(size_t) b] + im2[(size_t) b] * im2[(size_t) b]);
+
+    updateBands (s.bands);
+    smoothEnvelope (mags.data(), envA.data());
+    vocoderSynthesis (s, carrierMags.data());
+}
+
+/** Cross-synthesis of one frame: A's envelope (envA) on the carrier in re2/im2 with magnitudes tm. */
+void TransferEngine::vocoderSynthesis (const Settings& s, const float* tm) noexcept
+{
+    const juce::int64 n = samplesIn;
     smoothEnvelope (tm, envB.data());
     double lg = 0.0;
     for (int b = 1; b < numBins; ++b) lg += std::log (envB[(size_t) b] + 1.0e-9);

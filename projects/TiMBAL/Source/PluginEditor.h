@@ -118,10 +118,12 @@ public:
 private:
     void timerCallback() override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
-    void refreshTimbre();
+    void refreshSources();
+    void applySwapLayout();
+    juce::Rectangle<int> clipPanel() const;
     void refreshMode();
     void layoutTransferControls();
-    void browseForTimbre();
+    void browseFor (TimbalProcessor::Slot);
     void flash (juce::Rectangle<int>);
 
     TimbalProcessor& processor;
@@ -133,7 +135,15 @@ private:
     bool dragOver = false;
     int shownMode = -1;
 
+    // header
+    juce::ToggleButton swapToggle { "SWAP A / B" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> swapAttachment;
+    bool shownSwap = false;
+    int statusTicks = 0;
+
     // A
+    juce::OwnedArray<juce::ToggleButton> performancePills;
+    juce::TextButton loadA { "LOAD FILE" }, resetA { "RESET" };
     ui::InputView inputView;
     juce::Label inputStatus;
 
@@ -156,8 +166,8 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> grainAttachment;
     std::unique_ptr<ui::Cell> octaveCell, grainCell;
     std::unique_ptr<ui::Knob> transpose, snap, brightness, noise, consonants, vibrato, glide, continuity, pitchFix, detail, flatten, air;
-    struct Slot { juce::Component* c; int modes; };   // modes: bit 0 harmonic, 1 mosaic, 2 vocoder
-    std::vector<Slot> transferSlots;
+    struct ControlSlot { juce::Component* c; int modes; };   // modes: bit 0 harmonic, 1 mosaic, 2 vocoder
+    std::vector<ControlSlot> transferSlots;
 
     // Output
     ui::SpectrogramView spectrogram;

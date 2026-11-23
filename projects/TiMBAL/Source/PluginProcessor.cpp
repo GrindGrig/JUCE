@@ -38,6 +38,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout TimbalProcessor::createLayou
     layout.add (floatParam (ids::gate, "Gate", -80.0f, -20.0f, 0.5f, -55.0f, [] (float v) { return juce::String (v, 1) + " dB"; }));
     layout.add (floatParam (ids::mix, "Mix", 0.0f, 1.0f, 0.01f, 1.0f, percent));
     layout.add (floatParam (ids::gain, "Output gain", -24.0f, 12.0f, 0.1f, 0.0f, [] (float v) { return (v > 0 ? "+" : "") + juce::String (v, 1) + " dB"; }));
+    layout.add (std::make_unique<juce::AudioParameterBool> (juce::ParameterID { ids::swap, 1 }, "Swap A and B", false,
+                                                            juce::AudioParameterBoolAttributes().withAutomatable (false)));
     return layout;
 }
 
@@ -50,9 +52,10 @@ TimbalProcessor::TimbalProcessor()
     const auto get = [this] (const juce::String& id) { return parameters.getRawParameterValue (id); };
     raw = { get (ids::mode), get (ids::transpose), get (ids::autoOctave), get (ids::snap), get (ids::brightness), get (ids::noise),
             get (ids::consonants), get (ids::vibrato), get (ids::glide), get (ids::grain), get (ids::continuity), get (ids::pitchFix),
-            get (ids::detail), get (ids::flatten), get (ids::air), get (ids::gate), get (ids::mix), get (ids::gain) };
+            get (ids::detail), get (ids::flatten), get (ids::air), get (ids::gate), get (ids::mix), get (ids::gain), get (ids::swap) };
 
     setLatencySamples (engine.latencySamples());
+    startTimer (250);
 }
 
 TimbalProcessor::~TimbalProcessor()
@@ -68,6 +71,13 @@ bool TimbalProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
     return in == juce::AudioChannelSet::mono() || in == juce::AudioChannelSet::stereo();
 }
 
+void TimbalProcessor::runOnMessageThread (std::function<void (TimbalProcessor&)> fn)
+{
+    auto* mm = juce::MessageManager::getInstanceWithoutCreating();
+    if (mm != nullptr && mm->isThisTheMessageThread()) { fn (*this); return; }
+    juce::MessageManager::callAsync ([weak = juce::WeakReference<TimbalProcessor> (this), fn] { if (weak != nullptr) fn (*weak); });
+}
+
 void TimbalProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     rate = sampleRate;
@@ -76,24 +86,26 @@ void TimbalProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 
     const auto block = (size_t) juce::jmax (512, samplesPerBlock);
     monoIn.assign (block, 0.0f);
+    performanceIn.assign (block, 0.0f);
     wet.assign (block, 0.0f);
     dry.assign (block, 0.0f);
+
+    captureRing.assign ((size_t) juce::nextPowerOfTwo ((int) (sampleRate * liveWindowSeconds * 1.5)), 0.0f);
+    captureWritten = 0;
+    captureLoudSamples = 0;
+    freeRunPosition = 0;
 
     gainSmoothed.reset (sampleRate, 0.03);
     mixSmoothed.reset (sampleRate, 0.03);
     gainSmoothed.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (raw.gain->load()));
     mixSmoothed.setCurrentAndTargetValue (raw.mix->load());
 
-    // the mosaic and vocoder need the timbre analysed at the session's rate
-    const auto* model = getTimbre();
-    if ((model == nullptr || ! juce::exactlyEqual (model->sampleRate, sampleRate)) && ! loading.load())
+    // the clips are analysed at the session's rate (the mosaic and vocoder need that)
+    for (auto slot : { Slot::timbreClip, Slot::performanceClip })
     {
-        if (juce::MessageManager::getInstanceWithoutCreating() != nullptr
-            && juce::MessageManager::getInstanceWithoutCreating()->isThisTheMessageThread())
-            requestTimbre (source);
-        else
-            juce::MessageManager::callAsync ([weak = juce::WeakReference<TimbalProcessor> (this)]
-                                             { if (weak != nullptr) weak->requestTimbre (weak->source); });
+        const auto* model = getModel (slot);
+        if ((model == nullptr || ! juce::exactlyEqual (model->sampleRate, sampleRate)) && ! isLoading (slot))
+            runOnMessageThread ([slot] (TimbalProcessor& p) { p.requestClip (slot, p.getSource (slot)); });
     }
 }
 
@@ -125,22 +137,69 @@ void TimbalProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Midi
 
     const int numIn = getTotalNumInputChannels(), numOut = getTotalNumOutputChannels(), total = buffer.getNumSamples();
     const auto settings = readSettings();
-    const auto* model = current.load (std::memory_order_acquire);
+    const bool swapped = isSwapped();
+    const auto* timbre = getModel (swapped ? Slot::liveTimbre : Slot::timbreClip);
+    const auto* clip = swapped ? getModel (Slot::performanceClip) : nullptr;
     gainSmoothed.setTargetValue (juce::Decibels::decibelsToGain (raw.gain->load()));
     mixSmoothed.setTargetValue (raw.mix->load());
+
+    // the performance clip follows the host's timeline while it plays; with no timeline it runs freely
+    bool hasTimeline = false, playing = false;
+    juce::int64 hostSample = 0;
+    if (auto* head = getPlayHead())
+        if (auto pos = head->getPosition())
+            if (auto t = pos->getTimeInSamples())
+            {
+                hasTimeline = true;
+                playing = pos->getIsPlaying();
+                hostSample = *t;
+            }
+
+    const float gateLinear = juce::Decibels::decibelsToGain (settings.gateDb);
+    const auto captureMask = (juce::int64) captureRing.size() - 1;
 
     for (int start = 0; start < total;)
     {
         const int n = juce::jmin ((int) monoIn.size(), total - start);
 
+        double energy = 0.0;
         for (int i = 0; i < n; ++i)
         {
             float s = 0.0f;
             for (int c = 0; c < numIn; ++c) s += buffer.getReadPointer (c)[start + i];
             monoIn[(size_t) i] = numIn > 0 ? s / (float) numIn : 0.0f;
+            energy += (double) monoIn[(size_t) i] * monoIn[(size_t) i];
         }
 
-        engine.process (monoIn.data(), wet.data(), dry.data(), n, settings, model);
+        if (swapped)
+        {
+            // keep the recent input for the live timbre
+            auto w = captureWritten.load (std::memory_order_relaxed);
+            for (int i = 0; i < n; ++i) captureRing[(size_t) ((w + i) & captureMask)] = monoIn[(size_t) i];
+            captureWritten.store (w + n, std::memory_order_release);
+            if (std::sqrt (energy / juce::jmax (1, n)) > gateLinear) captureLoudSamples += n;
+
+            // play the performance clip (clips are normalised to full scale; play them back nearer a typical track level)
+            constexpr float clipLevel = 0.5f;
+            const bool run = clip != nullptr && ! clip->audio.empty() && (playing || ! hasTimeline);
+            const auto len = clip != nullptr ? (juce::int64) clip->audio.size() : (juce::int64) 1;
+            for (int i = 0; i < n; ++i)
+            {
+                if (! run) { performanceIn[(size_t) i] = 0.0f; continue; }
+                // read ahead by the latency so the result lines up with the timeline after delay compensation
+                const auto at = hasTimeline ? hostSample + start + i + engine.latencySamples() : freeRunPosition++;
+                performanceIn[(size_t) i] = clipLevel * clip->audio[(size_t) (((at % len) + len) % len)];
+            }
+            if (run)
+            {
+                const auto at = hasTimeline ? hostSample + start + n : freeRunPosition;
+                clipPosition.store ((float) (((at % len) + len) % len) / (float) len);
+            }
+            else clipPosition.store (-1.0f);
+        }
+        else clipPosition.store (-1.0f);
+
+        engine.process (swapped ? performanceIn.data() : monoIn.data(), monoIn.data(), wet.data(), dry.data(), n, settings, timbre, swapped);
 
         for (int i = 0; i < n; ++i)
         {
@@ -202,77 +261,153 @@ std::vector<float> TimbalProcessor::decodeFile (const juce::File& file, double t
     return out;
 }
 
-std::unique_ptr<tt::TimbreModel> TimbalProcessor::buildModel (const TimbreSource& src, double sampleRate, juce::String& error) const
+std::unique_ptr<tt::TimbreModel> TimbalProcessor::buildModel (Slot slot, const ClipSource& src, double sampleRate, juce::String& error)
 {
     if (src.builtIn >= 0)
-        return tt::analyseTimbre (tt::synthesiseBuiltIn (src.builtIn, sampleRate), sampleRate, tt::builtInTimbreNames()[src.builtIn]);
+    {
+        const auto names = exampleNames (slot);
+        const int index = juce::jlimit (0, names.size() - 1, src.builtIn);
+        auto audio = slot == Slot::performanceClip ? tt::synthesisePerformance (index, sampleRate) : tt::synthesiseBuiltIn (index, sampleRate);
+        return tt::analyseTimbre (std::move (audio), sampleRate, names[index]);
+    }
 
     auto audio = decodeFile (src.file, sampleRate, error);
     if (audio.empty()) return nullptr;
     auto model = tt::analyseTimbre (std::move (audio), sampleRate, src.file.getFileName());
-    if (model->active.empty()) { error = src.file.getFileName() + " is too quiet to learn from."; return nullptr; }
+    if (model->active.empty()) { error = src.file.getFileName() + " is too quiet to use."; return nullptr; }
     return model;
 }
 
-void TimbalProcessor::requestTimbre (const TimbreSource& src)
+void TimbalProcessor::requestClip (Slot slot, const ClipSource& src)
 {
-    source = src;
-    const int gen = ++generation;
-    loading = true;
-    lastError.clear();
+    auto& s = slots[(size_t) slot];
+    s.source = src;
+    const int gen = ++s.generation;
+    s.loading = true;
+    s.error.clear();
     sendChangeMessage();
 
     const double sampleRate = rate;
-    pool.addJob ([this, src, gen, sampleRate, weak = juce::WeakReference<TimbalProcessor> (this)]
+    pool.addJob ([slot, src, gen, sampleRate, weak = juce::WeakReference<TimbalProcessor> (this)]
     {
         juce::String error;
-        auto model = buildModel (src, sampleRate, error);
-        std::shared_ptr<tt::TimbreModel> shared (model.release());
+        std::shared_ptr<tt::TimbreModel> shared (buildModel (slot, src, sampleRate, error).release());
 
-        juce::MessageManager::callAsync ([weak, gen, shared, error]() mutable
+        juce::MessageManager::callAsync ([weak, slot, gen, shared, error]
         {
             auto* self = weak.get();
-            if (self == nullptr || gen != self->generation.load()) return;
+            if (self == nullptr) return;
+            auto& st = self->slots[(size_t) slot];
+            if (gen != st.generation.load()) return;
 
-            self->loading = false;
+            st.loading = false;
             if (shared != nullptr)
             {
                 const bool staleRate = ! juce::exactlyEqual (shared->sampleRate, self->rate);
-                self->install (std::unique_ptr<tt::TimbreModel> (new tt::TimbreModel (std::move (*shared))));
-                if (staleRate) { self->requestTimbre (self->source); return; }   // the session's rate changed meanwhile
+                self->install (slot, std::make_unique<tt::TimbreModel> (std::move (*shared)));
+                if (staleRate) { self->requestClip (slot, st.source); return; }   // the session's rate changed meanwhile
             }
-            else
-                self->lastError = error;
+            else st.error = error;
             self->sendChangeMessage();
         });
     });
 }
 
-bool TimbalProcessor::loadTimbreNow (const TimbreSource& src, double sampleRate)
+bool TimbalProcessor::loadClipNow (Slot slot, const ClipSource& src, double sampleRate)
 {
-    source = src;
+    auto& s = slots[(size_t) slot];
+    s.source = src;
     juce::String error;
-    auto model = buildModel (src, sampleRate, error);
-    lastError = error;
+    auto model = buildModel (slot, src, sampleRate, error);
+    s.error = error;
     if (model == nullptr) return false;
-    install (std::move (model));
+    install (slot, std::move (model));
     return true;
 }
 
-void TimbalProcessor::install (std::unique_ptr<tt::TimbreModel> model)
+//==============================================================================
+std::vector<float> TimbalProcessor::copyCapturedInput() const
+{
+    const auto written = captureWritten.load (std::memory_order_acquire);
+    const auto size = (juce::int64) captureRing.size();
+    // stay clear of the part the audio thread may be writing
+    const auto count = juce::jmin (written, (juce::int64) (rate * liveWindowSeconds), size - 8192);
+    std::vector<float> out ((size_t) juce::jmax ((juce::int64) 0, count));
+    for (juce::int64 k = 0; k < count; ++k)
+        out[(size_t) k] = captureRing[(size_t) ((written - count + k) & (size - 1))];
+    return out;
+}
+
+namespace
+{
+    std::unique_ptr<tt::TimbreModel> learnLive (std::vector<float> audio, double sampleRate)
+    {
+        if (audio.size() < (size_t) (sampleRate * 0.5)) return nullptr;
+        float peak = 0.0f;
+        for (auto v : audio) peak = juce::jmax (peak, std::abs (v));
+        if (peak < 1.0e-4f) return nullptr;
+        for (auto& v : audio) v *= 0.9f / peak;
+        auto model = tt::analyseTimbre (std::move (audio), sampleRate, "Live input");
+        return model->active.empty() ? nullptr : std::move (model);
+    }
+}
+
+void TimbalProcessor::startLiveLearn()
+{
+    liveLearnBusy = true;
+    captureLoudSamples = 0;
+    lastLiveLearn = juce::Time::getMillisecondCounter();
+
+    pool.addJob ([audio = copyCapturedInput(), sampleRate = rate, weak = juce::WeakReference<TimbalProcessor> (this)]() mutable
+    {
+        std::shared_ptr<tt::TimbreModel> shared (learnLive (std::move (audio), sampleRate).release());
+        juce::MessageManager::callAsync ([weak, shared]
+        {
+            auto* self = weak.get();
+            if (self == nullptr) return;
+            self->liveLearnBusy = false;
+            if (shared != nullptr)
+            {
+                self->install (Slot::liveTimbre, std::make_unique<tt::TimbreModel> (std::move (*shared)));
+                self->sendChangeMessage();
+            }
+        });
+    });
+}
+
+bool TimbalProcessor::learnFromInputNow()
+{
+    auto model = learnLive (copyCapturedInput(), rate);
+    if (model == nullptr) return false;
+    install (Slot::liveTimbre, std::move (model));
+    lastLiveLearn = juce::Time::getMillisecondCounter();
+    return true;
+}
+
+double TimbalProcessor::secondsSinceLiveLearn() const
+{
+    if (getModel (Slot::liveTimbre) == nullptr) return -1.0;
+    return (juce::Time::getMillisecondCounter() - lastLiveLearn) / 1000.0;
+}
+
+void TimbalProcessor::install (Slot slot, std::unique_ptr<tt::TimbreModel> model)
 {
     // the audio thread may still be reading the old model, so it is freed a little later
-    if (live != nullptr) retired.emplace_back (std::move (live), juce::Time::getMillisecondCounter());
-    live = std::move (model);
-    current.store (live.get(), std::memory_order_release);
-    if (! retired.empty()) startTimer (500);
+    auto& s = slots[(size_t) slot];
+    if (s.owned != nullptr) retired.emplace_back (std::move (s.owned), juce::Time::getMillisecondCounter());
+    s.owned = std::move (model);
+    s.current.store (s.owned.get(), std::memory_order_release);
 }
 
 void TimbalProcessor::timerCallback()
 {
     const auto now = juce::Time::getMillisecondCounter();
     retired.erase (std::remove_if (retired.begin(), retired.end(), [now] (auto& r) { return now - r.second > 1500; }), retired.end());
-    if (retired.empty()) stopTimer();
+
+    // while the input is B, relearn its timbre about once a second, once there is something to learn from
+    if (isSwapped() && ! liveLearnBusy.load() && now - lastLiveLearn >= 1000
+        && captureLoudSamples.load() > (juce::int64) (rate * 0.25))
+        startLiveLearn();
 }
 
 void TimbalProcessor::resetParameters (const juce::StringArray& paramIds)
@@ -290,27 +425,41 @@ void TimbalProcessor::resetParameters (const juce::StringArray& paramIds)
 void TimbalProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     auto state = parameters.copyState();
-    state.setProperty ("timbreBuiltIn", source.builtIn, nullptr);
-    state.setProperty ("timbreFile", source.file.getFullPathName(), nullptr);
+    const auto& t = slots[(size_t) Slot::timbreClip].source;
+    const auto& p = slots[(size_t) Slot::performanceClip].source;
+    state.setProperty ("timbreBuiltIn", t.builtIn, nullptr);
+    state.setProperty ("timbreFile", t.file.getFullPathName(), nullptr);
+    state.setProperty ("performanceBuiltIn", p.builtIn, nullptr);
+    state.setProperty ("performanceFile", p.file.getFullPathName(), nullptr);
     if (auto xml = state.createXml()) copyXmlToBinary (*xml, dest);
 }
 
 void TimbalProcessor::setStateInformation (const void* data, int size)
 {
-    if (auto xml = getXmlFromBinary (data, size))
-        if (xml->hasTagName (parameters.state.getType()))
-        {
-            auto state = juce::ValueTree::fromXml (*xml);
-            TimbreSource src;
-            src.builtIn = state.getProperty ("timbreBuiltIn", 0);
-            const auto path = state.getProperty ("timbreFile").toString();
-            if (src.builtIn < 0 && juce::File::isAbsolutePath (path)) src.file = juce::File (path);
-            else src.builtIn = juce::jmax (0, src.builtIn);
-            parameters.replaceState (state);
+    auto xml = getXmlFromBinary (data, size);
+    if (xml == nullptr || ! xml->hasTagName (parameters.state.getType())) return;
 
-            if (! (src == source) || getTimbre() == nullptr)
-                requestTimbre (src);
-        }
+    auto state = juce::ValueTree::fromXml (*xml);
+    const auto readSource = [&state] (const char* builtInKey, const char* fileKey)
+    {
+        ClipSource src;
+        src.builtIn = state.getProperty (builtInKey, 0);
+        const auto path = state.getProperty (fileKey).toString();
+        if (src.builtIn < 0 && juce::File::isAbsolutePath (path)) src.file = juce::File (path);
+        else src.builtIn = juce::jmax (0, src.builtIn);
+        return src;
+    };
+    const auto timbreSrc = readSource ("timbreBuiltIn", "timbreFile");
+    const auto performanceSrc = readSource ("performanceBuiltIn", "performanceFile");
+    parameters.replaceState (state);
+
+    runOnMessageThread ([timbreSrc, performanceSrc] (TimbalProcessor& p)
+    {
+        if (! (timbreSrc == p.getSource (Slot::timbreClip)) || p.getModel (Slot::timbreClip) == nullptr)
+            p.requestClip (Slot::timbreClip, timbreSrc);
+        if (! (performanceSrc == p.getSource (Slot::performanceClip)) || p.getModel (Slot::performanceClip) == nullptr)
+            p.requestClip (Slot::performanceClip, performanceSrc);
+    });
 }
 
 juce::AudioProcessorEditor* TimbalProcessor::createEditor() { return new TimbalEditor (*this); }
