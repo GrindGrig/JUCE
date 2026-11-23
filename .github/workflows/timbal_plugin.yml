@@ -1,0 +1,74 @@
+name: TiMBAL plug-in builds
+
+# Builds the TiMBAL VST3 for Windows and macOS (plus the AU on macOS) and keeps
+# the zipped bundles as downloadable artifacts on the run's page.
+
+on:
+  push:
+    branches:
+      - claude/**
+    paths:
+      - projects/TiMBAL/**
+      - projects/shared/cicada_ui/**
+      - .github/workflows/timbal_plugin.yml
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            artifact: TiMBAL-VST3-Windows-x64
+            configure: -A x64
+            targets: TiMBAL_VST3
+          - name: macOS universal
+            os: macos-latest
+            artifact: TiMBAL-VST3-AU-macOS-universal
+            configure: '-G Xcode "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.13'
+            targets: TiMBAL_VST3 TiMBAL_AU
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        working-directory: projects/TiMBAL
+        shell: bash
+        run: cmake -B build ${{ matrix.configure }}
+
+      - name: Build
+        working-directory: projects/TiMBAL
+        shell: bash
+        run: cmake --build build --config Release --parallel 4 --target ${{ matrix.targets }}
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        working-directory: projects/TiMBAL/build/TiMBAL_artefacts/Release
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item -Recurse VST3/TiMBAL.vst3 dist/
+          Copy-Item ../../../README.md dist/README.md
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        working-directory: projects/TiMBAL/build/TiMBAL_artefacts/Release
+        shell: bash
+        run: |
+          mkdir -p dist
+          # ad-hoc signature so Apple Silicon will load it; it is not notarised
+          codesign --force --deep --sign - VST3/TiMBAL.vst3
+          codesign --force --deep --sign - AU/TiMBAL.component
+          ditto VST3/TiMBAL.vst3 dist/TiMBAL.vst3
+          ditto AU/TiMBAL.component dist/TiMBAL.component
+          cp ../../../README.md dist/README.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: projects/TiMBAL/build/TiMBAL_artefacts/Release/dist
+          retention-days: 90
