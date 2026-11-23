@@ -87,7 +87,7 @@ int main()
     GeneratorParams params; params.genre = Genre::Rock;
     Generator::generate (p, params, all);
     std::array<LaneSettings, NumLanes> lanes;
-    for (int l = 0; l < NumLanes; ++l) lanes[(size_t) l].midiNote = laneInfo (l).defaultNote;
+    for (int l = 0; l < NumLanes; ++l) { lanes[(size_t) l].midiNote = laneInfo (l).defaultNote; lanes[(size_t) l].altMidiNote = laneInfo (l).defaultAltNote; }
 
     auto f = juce::File::createTempFile (".mid");
     if (! MidiExport::writeToFile (f, p, lanes, 120.0, true)) { std::cout << "ERROR writing midi\n"; return 1; }

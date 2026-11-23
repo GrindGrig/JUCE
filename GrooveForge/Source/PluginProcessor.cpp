@@ -9,7 +9,10 @@ GrooveForgeProcessor::GrooveForgeProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true))
 {
     for (int l = 0; l < NumLanes; ++l)
+    {
         lanes[(size_t) l].midiNote = laneInfo (l).defaultNote;
+        lanes[(size_t) l].altMidiNote = laneInfo (l).defaultAltNote;
+    }
 
     params.genre = Genre::House;
     params.swing = Generator::info (params.genre).swing;
@@ -165,15 +168,19 @@ void GrooveForgeProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         const auto msg = meta.getMessage();
         if (msg.isNoteOn())
             for (int l = 0; l < NumLanes; ++l)
+            {
                 if (audioLanes[(size_t) l].midiNote == msg.getNoteNumber())
-                    triggers.push_back ({ meta.samplePosition, l, msg.getFloatVelocity() });
+                    triggers.push_back ({ meta.samplePosition, l, msg.getFloatVelocity(), false });
+                else if (audioLanes[(size_t) l].altMidiNote == msg.getNoteNumber())
+                    triggers.push_back ({ meta.samplePosition, l, msg.getFloatVelocity(), true });
+            }
     }
     midi.clear();
 
-    if (const int mask = previewMask.exchange (0); mask != 0)
-        for (int l = 0; l < NumLanes; ++l)
-            if ((mask & (1 << l)) != 0)
-                triggers.push_back ({ 0, l, 0.9f });
+    if (const auto mask = previewMask.exchange (0); mask != 0)
+        for (int v = 0; v < NumLanes * 2; ++v)
+            if ((mask & (juce::uint64 (1) << v)) != 0)
+                triggers.push_back ({ 0, v / 2, 0.9f, (v % 2) == 1 });
 
     // --- transport -------------------------------------------------------------
     bool running = false;
@@ -251,16 +258,17 @@ void GrooveForgeProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             for (; t < endPpq; t += len)
             {
                 if (t < startPpq) continue;
-            if (triggers.size() >= triggers.capacity()) break;
+                if (triggers.size() >= triggers.capacity()) break;
                 const int s = juce::jlimit (0, numSamples - 1, (int) ((t - startPpq) / beatsPerSample));
-                triggers.push_back ({ s, n.lane, n.velocity });
+                triggers.push_back ({ s, n.lane, n.velocity, n.alt });
 
                 if (sendMidiOut)
                 {
                     const auto vel = (juce::uint8) juce::jlimit (1, 127, juce::roundToInt (n.velocity * 127.0f));
-                    midi.addEvent (juce::MidiMessage::noteOn (10, lane.midiNote, vel), s);
+                    const int key = midiNoteFor (lane, n);
+                    midi.addEvent (juce::MidiMessage::noteOn (10, key, vel), s);
                     if (numPendingOffs < (int) pendingOffs.size())
-                        pendingOffs[(size_t) numPendingOffs++] = { t + juce::jmax (0.05, n.length), lane.midiNote };
+                        pendingOffs[(size_t) numPendingOffs++] = { t + juce::jmax (0.05, n.length), key };
                 }
             }
         }
@@ -284,7 +292,7 @@ void GrooveForgeProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             synth.render (buffer, pos, tr.sample - pos, outputGain);
             pos = tr.sample;
         }
-        synth.trigger (tr.lane, tr.vel);
+        synth.trigger (tr.lane, tr.vel, tr.alt);
     }
     if (pos < numSamples)
         synth.render (buffer, pos, numSamples - pos, outputGain);
@@ -340,6 +348,7 @@ void GrooveForgeProcessor::getStateInformation (juce::MemoryBlock& destData)
     {
         auto* e = lanesXml->createNewChildElement ("Lane");
         e->setAttribute ("note", lanes[(size_t) l].midiNote);
+        e->setAttribute ("altNote", lanes[(size_t) l].altMidiNote);
         e->setAttribute ("muted", lanes[(size_t) l].muted);
         e->setAttribute ("locked", lanes[(size_t) l].locked);
     }
@@ -352,6 +361,7 @@ void GrooveForgeProcessor::getStateInformation (juce::MemoryBlock& destData)
         e->setAttribute ("b", n.beat);
         e->setAttribute ("d", n.length);
         e->setAttribute ("v", n.velocity);
+        if (n.alt) e->setAttribute ("a", true);
     }
 
     copyXmlToBinary (xml, destData);
@@ -388,6 +398,7 @@ void GrooveForgeProcessor::setStateInformation (const void* data, int sizeInByte
         {
             if (l >= NumLanes) break;
             lanes[(size_t) l].midiNote = juce::jlimit (0, 127, e->getIntAttribute ("note", laneInfo (l).defaultNote));
+            lanes[(size_t) l].altMidiNote = juce::jlimit (-1, 127, e->getIntAttribute ("altNote", laneInfo (l).defaultAltNote));
             lanes[(size_t) l].muted = e->getBoolAttribute ("muted");
             lanes[(size_t) l].locked = e->getBoolAttribute ("locked");
             ++l;
@@ -399,7 +410,7 @@ void GrooveForgeProcessor::setStateInformation (const void* data, int sizeInByte
         for (auto* e : notesXml->getChildIterator())
             pattern.notes.push_back ({ juce::jlimit (0, NumLanes - 1, e->getIntAttribute ("l")),
                                        e->getDoubleAttribute ("b"), e->getDoubleAttribute ("d", 0.25),
-                                       (float) e->getDoubleAttribute ("v", 0.8) });
+                                       (float) e->getDoubleAttribute ("v", 0.8), e->getBoolAttribute ("a") });
 
     pattern.sortNotes();
     pushToAudioThread();

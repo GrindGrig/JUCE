@@ -9,6 +9,7 @@ enum class Genre
 {
     House, Techno, HipHop, Trap, DrumAndBass, Breakbeat, Rock, Metal, Funk,
     Reggae, Afrobeat, Latin, Jazz, Dubstep, Reggaeton, UKGarage,
+    Celtic, MiddleEastern, WestAfrican, CajonUnplugged,
     NumGenres
 };
 
@@ -21,6 +22,7 @@ struct GeneratorParams
     float variation = 0.3f;    // 0..1 how much bars differ from each other
     bool fills = true;         // fill at the end of the pattern
     int seed = 1;
+    bool force = false;        // write the generated lanes even where the genre doesn't use them
 };
 
 struct GenreInfo

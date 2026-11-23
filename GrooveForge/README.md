@@ -1,6 +1,6 @@
 # Groove Forge
 
-![Groove Forge in 7/8 (2+2+3)](screenshot.png)
+![Groove Forge](screenshot.png)
 
 A drum machine plug-in (VST3 / AU / Standalone) built with JUCE. It combines a
 step sequencer with off-grid, piano-roll-style note placement, and includes a
@@ -13,16 +13,34 @@ genre-aware pattern generator that understands time signatures.
   snap to 1/4 … 1/64 or triplets, or set *Snap: Off* (or hold **Alt** while
   dragging) to place hits anywhere. Notes that sit clearly between 16ths get a
   small ◆ marker.
-- **12 layers:** Kick, Snare, Clap, Rim, Closed Hat, Open Hat, Low/Mid/High Tom,
-  Crash, Ride and Perc. Each layer has:
+- **17 layers:** Kick, Snare, Clap, Rim, Closed Hat, Open Hat, Low/Mid/High Tom,
+  Crash, Ride, Perc, and five hand drums: Bodhran, Djembe, Cajon, Darbuka and
+  Dundun. Each layer has:
   - **M**: mute (muted layers are also left out of exports)
   - **L**: lock (*Generate* leaves the layer alone)
   - **Gen**: regenerate only this layer
   - **X**: clear the layer
   - a MIDI note number (General MIDI drum map by default)
-- **Genre generator** with 16 styles: House, Techno, Hip-Hop/Boom Bap, Trap,
+- **Hand drums with two strokes.** Each hand drum has a main and a second
+  stroke, each with its own MIDI note (closest General MIDI match):
+
+  | Drum | Strokes | MIDI notes |
+  |------|---------|------------|
+  | Bodhran | open / top | 66 / 65 |
+  | Djembe | tone / slap | 63 / 62 |
+  | Cajon | bass / slap | 35 / 40 |
+  | Darbuka | doum / tek | 61 / 60 |
+  | Dundun | drum / bell | 41 / 56 |
+
+  Second strokes are drawn as outlined bars. Select a hit and press **S** to
+  switch its stroke; Shift-click a drum's name to hear the second stroke.
+- **Genre generator** with 20 styles: House, Techno, Hip-Hop/Boom Bap, Trap,
   Drum & Bass, Breakbeat, Rock, Metal, Funk, Reggae (One Drop), Afrobeat,
-  Latin/Bossa, Jazz Swing, Dubstep, Reggaeton, UK Garage.
+  Latin/Bossa, Jazz Swing, Dubstep, Reggaeton, UK Garage, plus four built around
+  the hand drums: Celtic / Folk (bodhran), Middle Eastern (darbuka), West
+  African (djembe and dundun with its bell timeline) and Cajon Unplugged.
+  Other genres bring in hand drums only where they fit, as Complexity rises.
+  The *Gen* button on a layer always fills it, even in a genre that doesn't use it.
   - *Complexity* controls density (ghost notes, syncopated kicks, extra
     percussion).
   - *Swing* ranges from 50 % (straight) to 75 %.
@@ -73,6 +91,25 @@ genre-aware pattern generator that understands time signatures.
 | Delete / Backspace, right-click | delete |
 | Ctrl/Cmd + wheel, or the Zoom bar | zoom horizontally |
 
+## Look
+
+The editor uses the **Cicada** design system through the shared `cicada_ui`
+JUCE module (`projects/shared/cicada_ui`): membrane panels with accents by
+role (Generator gold, Meter teal, Feel chlorophyll, Sequencer eye red).
+
+## Installing on Windows
+
+Download `GrooveForge-<version>-Windows-x64-Setup.exe` from the GitHub Actions
+run or release, and run it. It installs:
+
+- the VST3 plug-in to `C:\Program Files\Common Files\VST3\Groove Forge.vst3`
+- the standalone app to `C:\Program Files\Groove Forge` (optional), with a
+  Start menu shortcut
+
+Then rescan plug-ins in your DAW and load Groove Forge as an instrument. The
+installer is not code-signed, so Windows SmartScreen may warn the first time
+("More info" → "Run anyway").
+
 ## Building
 
 You need CMake 3.22 or newer and a C++17 compiler. On Linux you also need the
@@ -88,6 +125,26 @@ The build writes the plug-ins to
 `build-gf/GrooveForge_artefacts/Release/{VST3,AU,Standalone}`. Copy the
 `.vst3` (or `.component` on macOS) into your plug-in folder, or set
 `COPY_PLUGIN_AFTER_BUILD TRUE` in `CMakeLists.txt`.
+
+### Windows installer
+
+The `Groove Forge (Windows)` GitHub Actions workflow
+(`.github/workflows/grooveforge-windows.yml`) builds the VST3 and standalone
+app with Visual Studio 2022, runs the tests, and packages everything with
+Inno Setup. The installer is attached to each run as an artifact; pushing a
+tag such as `grooveforge-v0.2.0` also publishes it as a GitHub release.
+
+To build the installer on your own Windows machine (needs Visual Studio 2022
+and Inno Setup 6):
+
+```powershell
+cmake -S GrooveForge -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release
+powershell -ExecutionPolicy Bypass -File GrooveForge\Installer\build-installer.ps1 -BuildDir build
+```
+
+The installer is written to `GrooveForge\Installer\Output`. The C++ runtime is
+linked statically, so no Visual C++ Redistributable is needed.
 
 Tests:
 

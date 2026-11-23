@@ -76,12 +76,12 @@ void GridComponent::paint (juce::Graphics& g)
     const double barBeats = pat.beatsPerBar();
     const int h = getHeight();
 
-    g.fillAll (Colours::background);
+    g.fillAll (Colours::well);
 
     // lane stripes
     for (int l = 0; l < NumLanes; ++l)
     {
-        g.setColour (l % 2 == 0 ? juce::Colour (0xff1a1d23) : juce::Colour (0xff181a20));
+        g.setColour (l % 2 == 0 ? Colours::well : Colours::panel.withAlpha (0.45f));
         g.fillRect (0, l * laneHeight, getWidth(), laneHeight);
     }
 
@@ -94,8 +94,8 @@ void GridComponent::paint (juce::Graphics& g)
             const double start = b * barBeats + meter.tactusStart[(size_t) t] * stepBeats;
             const double len = meter.tactusLen[(size_t) t] * stepBeats;
             const int group = meter.superGroupOfTactus (t);
-            auto c = (group % 2 == 0) ? juce::Colour (0x0affffff) : juce::Colour (0x05ffffff);
-            if (t % 2 == 1) c = c.withMultipliedAlpha (0.4f);
+            auto c = (group % 2 == 0) ? Colours::panelLight.withAlpha (t % 2 == 1 ? 0.25f : 0.5f)
+                                       : Colours::vein.withAlpha (t % 2 == 1 ? 0.03f : 0.06f);
             g.setColour (c);
             g.fillRect (juce::Rectangle<float> (beatToX (start), 0.0f, beatToX (len), (float) h));
         }
@@ -106,7 +106,7 @@ void GridComponent::paint (juce::Graphics& g)
         const double grid = snapModes()[(size_t) juce::jlimit (0, (int) snapModes().size() - 1, processor.snapIndex)].beats;
         if (grid > 0.0 && ! nearlyEqual (std::fmod (stepBeats, grid), 0.0) && grid * pixelsPerBeat >= 5.0)
         {
-            g.setColour (juce::Colour (0x10ffffff));
+            g.setColour (Colours::line.withAlpha (0.6f));
             for (double x = 0.0; x < pat.lengthInBeats(); x += grid)
                 g.drawVerticalLine ((int) beatToX (x), 0.0f, (float) h);
         }
@@ -119,10 +119,10 @@ void GridComponent::paint (juce::Graphics& g)
         {
             const auto& st = meter.steps[(size_t) s];
             const float x = beatToX (b * barBeats + s * stepBeats);
-            if (st.barStart)          g.setColour (juce::Colour (0xff5a6070));
-            else if (st.superStart)   g.setColour (juce::Colour (0xff3c414d));
-            else if (st.tactusStart)  g.setColour (juce::Colour (0xff30343e));
-            else                      g.setColour (juce::Colour (0xff22252c));
+            if (st.barStart)          g.setColour (Colours::vein.withAlpha (0.55f));
+            else if (st.superStart)   g.setColour (Colours::vein.withAlpha (0.25f));
+            else if (st.tactusStart)  g.setColour (Colours::line);
+            else                      g.setColour (Colours::line.withAlpha (0.5f));
             g.drawVerticalLine ((int) x, 0.0f, (float) h);
             if (st.barStart)
                 g.drawVerticalLine ((int) x + 1, 0.0f, (float) h);
@@ -131,7 +131,7 @@ void GridComponent::paint (juce::Graphics& g)
 
     for (int l = 1; l < NumLanes; ++l)
     {
-        g.setColour (juce::Colour (0xff101216));
+        g.setColour (Colours::background);
         g.drawHorizontalLine (l * laneHeight, 0.0f, (float) getWidth());
     }
 
@@ -146,21 +146,31 @@ void GridComponent::paint (juce::Graphics& g)
         const bool muted = lanes[(size_t) n.lane].muted;
         const float alpha = muted ? 0.25f : 0.35f + 0.65f * n.velocity;
 
-        g.setColour (base.withAlpha (alpha * 0.55f));
+        g.setColour (Colours::panelLight);
         g.fillRoundedRectangle (r, 3.0f);
+        g.setColour (base.withAlpha (muted ? 0.2f : 0.45f));
+        g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, 1.0f);
 
-        // velocity bar
-        auto vr = r.reduced (1.5f);
+        // velocity bar: filled for the main stroke, outlined with a cap for the second stroke
+        auto vr = r.reduced (2.0f);
         vr = vr.withTop (vr.getBottom() - vr.getHeight() * n.velocity);
         g.setColour (base.withAlpha (alpha));
-        g.fillRoundedRectangle (vr, 2.0f);
+        if (n.alt)
+        {
+            g.drawRoundedRectangle (vr.reduced (0.75f), 2.0f, 1.5f);
+            g.fillRect (vr.withHeight (2.0f));
+        }
+        else
+        {
+            g.fillRoundedRectangle (vr, 2.0f);
+        }
 
         // mark notes that sit clearly between 16ths (more than humanize drift)
         const bool offGrid = std::abs (n.beat * 4.0 - std::round (n.beat * 4.0)) > 0.08;
         if (offGrid)
         {
             // off-grid marker: a small diamond on top
-            g.setColour (juce::Colours::white.withAlpha (0.9f));
+            g.setColour (Colours::text);
             juce::Path d;
             const float cx = r.getX() + 4.0f, cy = r.getY() + 4.0f;
             d.addTriangle (cx - 3.0f, cy, cx, cy - 3.0f, cx + 3.0f, cy);
@@ -170,7 +180,7 @@ void GridComponent::paint (juce::Graphics& g)
 
         if (i == selectedIndex || i == hoverIndex)
         {
-            g.setColour (i == selectedIndex ? juce::Colours::white : juce::Colours::white.withAlpha (0.4f));
+            g.setColour (i == selectedIndex ? Colours::text : Colours::vein);
             g.drawRoundedRectangle (r, 3.0f, i == selectedIndex ? 1.5f : 1.0f);
         }
     }
@@ -179,7 +189,9 @@ void GridComponent::paint (juce::Graphics& g)
     const double ph = processor.playheadBeat.load();
     if (ph >= 0.0)
     {
-        g.setColour (Colours::accent);
+        g.setColour (juce::Colours::white.withAlpha (0.25f));
+        g.fillRect (beatToX (ph) - 3.0f, 0.0f, 6.0f, (float) h);
+        g.setColour (juce::Colours::white);
         g.fillRect (beatToX (ph) - 1.0f, 0.0f, 2.0f, (float) h);
     }
 }
@@ -210,7 +222,9 @@ void GridComponent::showNoteStatus (int index)
     const double sixteenth = inBar * 4.0;
     const int ticks = juce::roundToInt ((sixteenth - std::floor (sixteenth + 1.0e-6)) * 240.0);   // 960 PPQ -> 240 per 16th
 
-    onStatus (juce::String (laneInfo (n.lane).name) + "  bar " + juce::String (bar + 1)
+    const auto& info = laneInfo (n.lane);
+    onStatus (juce::String (info.name) + (info.stroke != nullptr ? juce::String (" ") + (n.alt ? info.altStroke : info.stroke) : juce::String())
+              + "  bar " + juce::String (bar + 1)
               + "  16th " + juce::String ((int) std::floor (sixteenth + 1.0e-6) + 1)
               + (ticks != 0 ? " +" + juce::String (ticks) + " ticks (off-grid)" : juce::String())
               + "  vel " + juce::String (juce::roundToInt (n.velocity * 127.0f)));
@@ -247,7 +261,7 @@ void GridComponent::mouseDown (const juce::MouseEvent& e)
         dragStartBeat = n.beat;
         dragStartVelocity = n.velocity;
         grabOffset = xToBeat (e.position.x) - n.beat;
-        processor.previewLane (n.lane);
+        processor.previewLane (n.lane, n.alt);
     }
     else
     {
@@ -266,7 +280,7 @@ void GridComponent::mouseDown (const juce::MouseEvent& e)
         // find it again after sorting
         const auto& notes = processor.getPattern().notes;
         for (int i = 0; i < (int) notes.size(); ++i)
-            if (notes[(size_t) i].lane == lane && nearlyEqual (notes[(size_t) i].beat, beat))
+            if (notes[(size_t) i].lane == lane && ! notes[(size_t) i].alt && nearlyEqual (notes[(size_t) i].beat, beat))
                 dragIndex = selectedIndex = i;
 
         dragStartBeat = beat;
@@ -315,7 +329,7 @@ void GridComponent::mouseDrag (const juce::MouseEvent& e)
 
     const auto& notes = processor.getPattern().notes;
     for (int i = 0; i < (int) notes.size(); ++i)
-        if (notes[(size_t) i].lane == updated.lane && nearlyEqual (notes[(size_t) i].beat, updated.beat))
+        if (notes[(size_t) i].lane == updated.lane && notes[(size_t) i].alt == updated.alt && nearlyEqual (notes[(size_t) i].beat, updated.beat))
             dragIndex = selectedIndex = i;
 
     showNoteStatus (selectedIndex);
@@ -383,6 +397,11 @@ bool GridComponent::keyPressed (const juce::KeyPress& k)
         const double amount = k.getModifiers().isShiftDown() && snap > 0.0 ? snap : 1.0 / 128.0;
         n.beat = juce::jlimit (0.0, len - 1.0e-6, n.beat + (k.isKeyCode (juce::KeyPress::leftKey) ? -amount : amount));
     }
+    else if ((k.getTextCharacter() == 's' || k.getTextCharacter() == 'S') && hasTwoStrokes (n.lane))
+    {
+        n.alt = ! n.alt;
+        processor.previewLane (n.lane, n.alt);
+    }
     else if (k.isKeyCode (juce::KeyPress::upKey) || k.isKeyCode (juce::KeyPress::downKey))
     {
         n.velocity = juce::jlimit (0.03f, 1.0f, n.velocity + (k.isKeyCode (juce::KeyPress::upKey) ? 0.05f : -0.05f));
@@ -393,7 +412,7 @@ bool GridComponent::keyPressed (const juce::KeyPress& k)
     processor.modifyPattern ([idx, n] (Pattern& p) { p.notes[(size_t) idx] = n; });
     const auto& notes = processor.getPattern().notes;
     for (int i = 0; i < (int) notes.size(); ++i)
-        if (notes[(size_t) i].lane == n.lane && nearlyEqual (notes[(size_t) i].beat, n.beat))
+        if (notes[(size_t) i].lane == n.lane && notes[(size_t) i].alt == n.alt && nearlyEqual (notes[(size_t) i].beat, n.beat))
             selectedIndex = i;
     showNoteStatus (selectedIndex);
     return true;
@@ -404,7 +423,10 @@ LaneHeader::LaneHeader (GrooveForgeProcessor& p, int l) : processor (p), lane (l
 {
     nameButton.setButtonText (laneInfo (lane).name);
     nameButton.setTooltip ("Click to preview this sound");
-    nameButton.onClick = [this] { processor.previewLane (lane); };
+    nameButton.onClick = [this] { processor.previewLane (lane, hasTwoStrokes (lane) && juce::ModifierKeys::currentModifiers.isShiftDown()); };
+    if (hasTwoStrokes (lane))
+        nameButton.setTooltip (juce::String ("Click: preview ") + laneInfo (lane).stroke + ".  Shift+click: " + laneInfo (lane).altStroke
+                               + ".\nSelect a hit and press S to switch its stroke.");
 
     muteButton.setClickingTogglesState (true);
     muteButton.setTooltip ("Mute layer (also excluded from MIDI export)");
@@ -424,12 +446,16 @@ LaneHeader::LaneHeader (GrooveForgeProcessor& p, int l) : processor (p), lane (l
     noteSlider.setIncDecButtonsMode (juce::Slider::incDecButtonsDraggable_Vertical);
     noteSlider.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 34, 18);
     noteSlider.setRange (0, 127, 1);
-    noteSlider.setTooltip ("MIDI note sent for this layer (default: General MIDI drum map)");
+    noteSlider.setTooltip (hasTwoStrokes (lane)
+                               ? juce::String ("MIDI note for the ") + laneInfo (lane).stroke + " stroke (the " + laneInfo (lane).altStroke
+                                     + " stroke sends " + juce::String (laneInfo (lane).defaultAltNote) + ")"
+                               : juce::String ("MIDI note sent for this layer (default: General MIDI drum map)"));
     noteSlider.onValueChange = [this] { processor.modifyLane (lane, [this] (LaneSettings& s) { s.midiNote = (int) noteSlider.getValue(); }); };
 
     for (auto* b : { &muteButton, &lockButton })
     {
-        b->setColour (juce::TextButton::buttonOnColourId, b == &muteButton ? juce::Colour (0xffd04040) : juce::Colour (0xff3a8ad0));
+        b->setColour (juce::TextButton::buttonOnColourId, b == &muteButton ? Colours::eye : Colours::vein);
+        b->setColour (juce::TextButton::textColourOnId, Colours::background);
     }
 
     for (juce::Component* c : { (juce::Component*) &nameButton, (juce::Component*) &muteButton, (juce::Component*) &lockButton,
@@ -449,14 +475,23 @@ void LaneHeader::refresh()
 
 void LaneHeader::paint (juce::Graphics& g)
 {
-    g.fillAll (lane % 2 == 0 ? Colours::panel : Colours::panel.darker (0.08f));
-    g.setColour (juce::Colour (laneInfo (lane).colour));
-    g.fillRect (0, 2, 4, getHeight() - 4);
+    g.fillAll (lane % 2 == 0 ? Colours::panel : Colours::panel.darker (0.12f));
+
+    // glowing accent dot, as Cicada section titles have
+    const auto c = juce::Colour (laneInfo (lane).colour);
+    const auto centre = juce::Point<float> (7.0f, (float) getHeight() * 0.5f);
+    g.setColour (c.withAlpha (0.25f));
+    g.fillEllipse (juce::Rectangle<float> (9.0f, 9.0f).withCentre (centre));
+    g.setColour (c);
+    g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (centre));
+
+    g.setColour (Colours::background);
+    g.drawHorizontalLine (getHeight() - 1, 0.0f, (float) getWidth());
 }
 
 void LaneHeader::resized()
 {
-    auto r = getLocalBounds().reduced (2).withTrimmedLeft (6);
+    auto r = getLocalBounds().reduced (2).withTrimmedLeft (12);
     const int bw = 28;
     clearButton.setBounds (r.removeFromRight (bw));
     diceButton.setBounds (r.removeFromRight (bw + 12));

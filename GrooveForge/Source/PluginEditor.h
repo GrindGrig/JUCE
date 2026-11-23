@@ -48,14 +48,13 @@ private:
     void setupKnob (juce::Slider&, juce::Label&, const juce::String& name, const juce::String& tooltip);
 
     GrooveForgeProcessor& processor;
-    juce::LookAndFeel_V4 lnf;
+    cicada::LookAndFeel lnf;
     juce::TooltipWindow tooltips { this, 600 };
 
-    juce::Label title;
     juce::ComboBox genreBox;
-    juce::TextButton generateButton { "GENERATE" }, playButton { "Play" }, exportButton { "Export MIDI..." };
-    juce::ToggleButton fillsToggle { "Fills" }, splitToggle { "One track per layer" }, followHostToggle { "Follow host meter" },
-                       midiOutToggle { "Live MIDI out" };
+    juce::TextButton generateButton { "GENERATE" }, playButton { "PLAY" }, exportButton { "EXPORT MIDI..." };
+    juce::ToggleButton fillsToggle { "FILLS" }, splitToggle { "TRACK PER LAYER" }, followHostToggle { "FOLLOW HOST" },
+                       midiOutToggle { "LIVE MIDI OUT" };
 
     juce::Label timeLabel { {}, "Time" }, slashLabel { {}, "/" }, groupLabel { {}, "Groups" }, barsLabel { {}, "Bars" },
                 snapLabel { {}, "Snap" }, tempoLabel { {}, "BPM" }, zoomLabel { {}, "Zoom" };
@@ -77,6 +76,9 @@ private:
     std::unique_ptr<juce::FileChooser> chooser;
     bool refreshing = false;
     bool autoFit = true;
+
+    // membrane panels (Cicada): generator = gold, meter = teal, feel = chlorophyll, export = ink, sequencer = eye
+    juce::Rectangle<int> headerArea, genPanel, meterPanel, feelPanel, outPanel, seqPanel;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (GrooveForgeEditor)
 };

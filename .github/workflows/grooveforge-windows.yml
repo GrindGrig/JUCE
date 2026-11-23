@@ -1,0 +1,68 @@
+name: Groove Forge (Windows)
+
+# Builds the Groove Forge VST3 and standalone app with MSVC, runs the tests,
+# and packages them into an Inno Setup installer.
+#  - every push that touches Groove Forge: the installer is attached to the run as an artifact
+#  - a tag named grooveforge-v* (e.g. grooveforge-v0.2.0): also published as a GitHub release
+on:
+  push:
+    branches: ["**"]
+    tags: ["grooveforge-v*"]
+    paths:
+      - "GrooveForge/**"
+      - "projects/shared/cicada_ui/**"
+      - ".github/workflows/grooveforge-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S GrooveForge -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        shell: pwsh
+        run: |
+          & "build\GrooveForgeGenTest_artefacts\Release\GrooveForgeGenTest.exe" | Select-Object -Last 3
+          if ($LASTEXITCODE -ne 0) { throw "Generator test failed" }
+          & "build\GrooveForgeProcessorTest_artefacts\Release\GrooveForgeProcessorTest.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Processor test failed" }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+
+      - name: Build installer
+        shell: pwsh
+        run: >
+          GrooveForge\Installer\build-installer.ps1 -BuildDir build
+          -SourceUrl "${{ github.server_url }}/${{ github.repository }}/tree/${{ github.sha }}/GrooveForge"
+          -OutputDir "${{ github.workspace }}\dist"
+
+      - name: Zip the VST3 bundle
+        shell: pwsh
+        run: Compress-Archive -Path "build\GrooveForge_artefacts\Release\VST3\Groove Forge.vst3" -DestinationPath "dist\GrooveForge-VST3-Windows-x64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GrooveForge-Windows-x64
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/grooveforge-v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist/* --title "Groove Forge ${{ github.ref_name }}" --notes "Windows x64 installer (VST3 + standalone) and the VST3 bundle as a zip."

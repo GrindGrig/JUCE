@@ -7,7 +7,8 @@ namespace gf
 {
 
 /** A tiny synthesized drum kit so patterns are audible without loading samples.
-    One voice per lane (re-triggering restarts it); closed hat chokes open hat. */
+    One voice per lane and stroke (re-triggering restarts it), so a dundun's drum and
+    bell can sound together; closed hat chokes open hat. */
 class DrumSynth
 {
 public:
@@ -15,19 +16,22 @@ public:
     {
         sampleRate = newSampleRate;
         for (int l = 0; l < NumLanes; ++l)
-        {
-            voices[(size_t) l].lane = l;
-            voices[(size_t) l].setup (sampleRate);
-        }
+            for (int a = 0; a < 2; ++a)
+            {
+                auto& v = voices[(size_t) (l * 2 + a)];
+                v.lane = l;
+                v.alt = a == 1;
+                v.setup (sampleRate);
+            }
     }
 
-    void trigger (int lane, float velocity)
+    void trigger (int lane, float velocity, bool alt = false)
     {
         if (! juce::isPositiveAndBelow (lane, (int) NumLanes))
             return;
         if (lane == ClosedHat)
-            voices[(size_t) OpenHat].choke();
-        voices[(size_t) lane].start (velocity);
+            voices[(size_t) (OpenHat * 2)].choke();
+        voices[(size_t) (lane * 2 + (alt && hasTwoStrokes (lane) ? 1 : 0))].start (velocity);
     }
 
     /** Renders [start, start + num) adding into the buffer. */
@@ -53,6 +57,7 @@ private:
     struct Voice
     {
         int lane = 0;
+        bool alt = false;
         bool active = false;
         double sr = 44100.0;
         double t = 0.0;            // seconds since trigger
@@ -78,6 +83,10 @@ private:
                 case Ride:      pan = 0.35f; break;
                 case Crash:     pan = -0.35f; break;
                 case Perc:      pan = 0.45f; break;
+                case Bodhran:   pan = -0.2f; break;
+                case Djembe:    pan = 0.3f; break;
+                case Darbuka:   pan = -0.35f; break;
+                case Dundun:    pan = 0.15f; break;
                 default: break;
             }
             panL = std::sqrt (0.5f * (1.0f - pan)) * 1.41f;
@@ -96,6 +105,11 @@ private:
                 case Crash:     filterA.setCoefficients (hp (4000.0)); break;
                 case Ride:      filterA.setCoefficients (bp (5200.0, 1.5)); break;
                 case Perc:      filterA.setCoefficients (bp (6500.0, 1.8)); break;
+                case Bodhran:   filterA.setCoefficients (alt ? bp (1600.0, 1.5) : juce::IIRCoefficients::makeLowPass (sr, 900.0)); break;
+                case Djembe:    filterA.setCoefficients (alt ? bp (2600.0, 0.9) : bp (700.0, 1.0)); break;
+                case Cajon:     filterA.setCoefficients (alt ? hp (1400.0) : juce::IIRCoefficients::makeLowPass (sr, 600.0)); break;
+                case Darbuka:   filterA.setCoefficients (bp (3800.0, 2.0)); break;
+                case Dundun:    filterA.setCoefficients (alt ? bp (900.0, 2.0) : bp (1200.0, 1.0)); break;
                 default:        filterA.setCoefficients (hp (20.0)); break;
             }
         }
@@ -116,6 +130,19 @@ private:
         void choke() { if (active) choking = true; }
 
         float white() { return noise.nextFloat() * 2.0f - 1.0f; }
+
+        float bell()   // two-partial cowbell-like tone
+        {
+            metalPhases[0] += 562.0 / sr; if (metalPhases[0] >= 1.0) metalPhases[0] -= 1.0;
+            metalPhases[1] += 845.0 / sr; if (metalPhases[1] >= 1.0) metalPhases[1] -= 1.0;
+            return ((metalPhases[0] < 0.5 ? 1.0f : -1.0f) + (metalPhases[1] < 0.5 ? 1.0f : -1.0f)) * 0.5f;
+        }
+
+        /** Membrane with a downward pitch glide: from `from` Hz to `to` Hz over `glide` s. */
+        float drum (double from, double to, double glide)
+        {
+            return tone (to + (from - to) * std::exp (-t / glide));
+        }
 
         float metal()
         {
@@ -206,6 +233,42 @@ private:
                     length = 0.3;
                     break;
                 }
+                case Bodhran:
+                    if (! alt)  // open: deep frame-drum boom
+                        out = drum (110.0, 68.0, 0.04) * env (t, 0.25) * 0.95f + filterA.processSingleSampleRaw (white()) * env (t, 0.03) * 0.5f;
+                    else        // top: tighter, higher stick stroke
+                        out = drum (190.0, 150.0, 0.02) * env (t, 0.09) * 0.55f + filterA.processSingleSampleRaw (white()) * env (t, 0.02) * 0.5f;
+                    length = 1.2;
+                    break;
+                case Djembe:
+                    if (! alt)  // tone
+                        out = (float) (2.0 / juce::MathConstants<double>::pi * std::asin (drum (340.0, 290.0, 0.015))) * env (t, 0.15) * 0.7f
+                            + filterA.processSingleSampleRaw (white()) * env (t, 0.04) * 0.35f;
+                    else        // slap
+                        out = filterA.processSingleSampleRaw (white()) * env (t, 0.06) * 1.1f + tone (440.0) * env (t, 0.04) * 0.35f;
+                    length = 0.8;
+                    break;
+                case Cajon:
+                    if (! alt)  // bass
+                        out = drum (120.0, 62.0, 0.025) * env (t, 0.22) * 0.95f + filterA.processSingleSampleRaw (white()) * env (t, 0.02) * 0.4f;
+                    else        // slap with snare wires
+                        out = filterA.processSingleSampleRaw (white()) * env (t, 0.15) * 0.75f + tone (240.0) * env (t, 0.05) * 0.4f;
+                    length = 0.9;
+                    break;
+                case Darbuka:
+                    if (! alt)  // doum: ringing low stroke
+                        out = drum (150.0, 105.0, 0.05) * env (t, 0.45) * 0.9f;
+                    else        // tek: sharp rim click
+                        out = filterA.processSingleSampleRaw (white()) * env (t, 0.025) + tone (1250.0) * env (t, 0.02) * 0.25f;
+                    length = 2.0;
+                    break;
+                case Dundun:
+                    if (! alt)  // drum
+                        out = drum (82.0, 56.0, 0.035) * env (t, 0.35) + filterA.processSingleSampleRaw (white()) * env (t, 0.015) * 0.3f;
+                    else        // bell
+                        out = filterA.processSingleSampleRaw (bell()) * env (t, 0.18) * 0.6f;
+                    length = 1.6;
+                    break;
                 default: break;
             }
 
@@ -224,7 +287,7 @@ private:
     };
 
     double sampleRate = 44100.0;
-    std::array<Voice, NumLanes> voices;
+    std::array<Voice, NumLanes * 2> voices;
 };
 
 } // namespace gf

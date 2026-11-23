@@ -95,7 +95,7 @@ public:
     std::atomic<int> hostNumerator { 0 }, hostDenominator { 0 };
     std::atomic<double> hostBpm { 0.0 };
 
-    void previewLane (int lane)  { previewMask.fetch_or (1 << lane); }
+    void previewLane (int lane, bool alt = false)  { previewMask.fetch_or (juce::uint64 (1) << (lane * 2 + (alt ? 1 : 0))); }
 
     juce::File writeTempMidiFile();
     juce::String suggestedFileName() const;
@@ -115,9 +115,9 @@ private:
     double audioLength = 8.0;
 
     DrumSynth synth;
-    struct Trigger { int sample; int lane; float vel; };
+    struct Trigger { int sample; int lane; float vel; bool alt; };
     std::vector<Trigger> triggers;
-    std::atomic<int> previewMask { 0 };
+    std::atomic<juce::uint64> previewMask { 0 };
 
     struct PendingOff { double beat; int note; };
     std::array<PendingOff, 512> pendingOffs;

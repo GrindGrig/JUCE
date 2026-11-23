@@ -9,9 +9,9 @@ void MidiDragPad::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat().reduced (1.0f);
     const bool over = isMouseOver (true);
-    g.setColour (over ? Colours::accent.withAlpha (0.25f) : Colours::panelLight);
+    g.setColour (over ? Colours::panelLight : Colours::well);
     g.fillRoundedRectangle (r, 6.0f);
-    g.setColour (Colours::accent);
+    g.setColour (over ? Colours::vein : Colours::vein.withAlpha (0.55f));
     const float dashes[] = { 5.0f, 4.0f };
     juce::Path p;
     p.addRoundedRectangle (r.reduced (1.0f), 6.0f);
@@ -20,7 +20,7 @@ void MidiDragPad::paint (juce::Graphics& g)
     g.fillPath (dashed);
 
     g.setColour (Colours::text);
-    g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+    g.setFont (juce::FontOptions (10.5f, juce::Font::bold).withKerningFactor (0.12f));
     g.drawFittedText ("DRAG MIDI TO DAW", getLocalBounds().reduced (6), juce::Justification::centred, 2);
 }
 
@@ -36,9 +36,11 @@ void MidiDragPad::mouseDrag (const juce::MouseEvent& e)
 }
 
 //==============================================================================
-static void styleLabel (juce::Label& l, float size = 13.0f, bool dim = true)
+static void styleLabel (juce::Label& l, float size = 10.0f, bool dim = true)
 {
-    l.setFont (juce::FontOptions (size));
+    // Cicada control labels: uppercase, tracked, sage
+    l.setText (l.getText().toUpperCase(), juce::dontSendNotification);
+    l.setFont (juce::FontOptions (size, juce::Font::bold).withKerningFactor (0.1f));
     l.setColour (juce::Label::textColourId, dim ? Colours::textDim : Colours::text);
     l.setJustificationType (juce::Justification::centredLeft);
 }
@@ -46,17 +48,16 @@ static void styleLabel (juce::Label& l, float size = 13.0f, bool dim = true)
 void GrooveForgeEditor::setupKnob (juce::Slider& s, juce::Label& l, const juce::String& name, const juce::String& tip)
 {
     s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-    s.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    s.setTextBoxStyle (juce::Slider::TextBoxBelow, true, 60, 14);
     s.setRange (0.0, 1.0, 0.001);
-    s.setTooltip (tip);
-    s.setColour (juce::Slider::rotarySliderFillColourId, Colours::accent);
-    s.setColour (juce::Slider::rotarySliderOutlineColourId, Colours::panelLight);
-    s.setColour (juce::Slider::thumbColourId, Colours::text);
-    s.setPopupDisplayEnabled (true, true, this);
+    s.setTooltip (tip + "\nDouble-click to reset.");
+    s.setColour (juce::Slider::textBoxTextColourId, Colours::text);
+    s.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    s.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
     addAndMakeVisible (s);
 
     l.setText (name, juce::dontSendNotification);
-    styleLabel (l, 12.0f);
+    styleLabel (l);
     l.setJustificationType (juce::Justification::centred);
     addAndMakeVisible (l);
 }
@@ -64,14 +65,7 @@ void GrooveForgeEditor::setupKnob (juce::Slider& s, juce::Label& l, const juce::
 GrooveForgeEditor::GrooveForgeEditor (GrooveForgeProcessor& p)
     : AudioProcessorEditor (p), processor (p), dragPad (p), grid (p)
 {
-    lnf.setColourScheme ({ 0xff1e2128, 0xff15171c, 0xff1e2128, 0xff5a6070, 0xffe6e8ee,
-                           0xff2a2e37, 0xffffffff, 0xffff8a3a, 0xffe6e8ee });
     setLookAndFeel (&lnf);
-
-    title.setText ("GROOVE FORGE", juce::dontSendNotification);
-    title.setFont (juce::FontOptions (22.0f, juce::Font::bold));
-    title.setColour (juce::Label::textColourId, Colours::accent);
-    addAndMakeVisible (title);
 
     genreBox.addItemList (Generator::genreNames(), 1);
     genreBox.setTooltip ("Genre the generator writes in");
@@ -88,8 +82,13 @@ GrooveForgeEditor::GrooveForgeEditor (GrooveForgeProcessor& p)
     };
     addAndMakeVisible (genreBox);
 
-    generateButton.setColour (juce::TextButton::buttonColourId, Colours::accent);
-    generateButton.setColour (juce::TextButton::textColourOffId, juce::Colours::black);
+    generateButton.setColour (juce::TextButton::textColourOffId, Colours::gold);
+    playButton.setColour (juce::TextButton::buttonOnColourId, Colours::eye);
+    playButton.setColour (juce::TextButton::textColourOnId, Colours::background);
+    fillsToggle.setColour (juce::ToggleButton::tickColourId, Colours::gold);
+    followHostToggle.setColour (juce::ToggleButton::tickColourId, Colours::teal);
+    splitToggle.setColour (juce::ToggleButton::tickColourId, Colours::text);
+    midiOutToggle.setColour (juce::ToggleButton::tickColourId, Colours::eye);
     generateButton.setTooltip ("Generate a new pattern for every unlocked layer");
     generateButton.onClick = [this] { processor.generate(); };
     addAndMakeVisible (generateButton);
@@ -167,6 +166,18 @@ GrooveForgeEditor::GrooveForgeEditor (GrooveForgeProcessor& p)
     setupKnob (volumeKnob, volumeLabel, "Volume", "Output level of the built-in drum kit");
     swingKnob.setRange (0.5, 0.75, 0.001);
 
+    // accents by section role
+    complexityKnob.setColour (juce::Slider::rotarySliderFillColourId, Colours::gold);
+    for (auto* k : { &swingKnob, &humanizeKnob, &variationKnob })
+        k->setColour (juce::Slider::rotarySliderFillColourId, Colours::chlorophyll);
+    volumeKnob.setColour (juce::Slider::rotarySliderFillColourId, Colours::text);
+
+    complexityKnob.setDoubleClickReturnValue (true, 0.5);
+    humanizeKnob.setDoubleClickReturnValue (true, 0.2);
+    variationKnob.setDoubleClickReturnValue (true, 0.3);
+    volumeKnob.setDoubleClickReturnValue (true, 0.8);
+    swingKnob.setDoubleClickReturnValue (true, 0.5);
+
     auto regenOnRelease = [this] { processor.generate (-1, false); };
     complexityKnob.onValueChange = [this] { processor.getParams().complexity = (float) complexityKnob.getValue(); };
     swingKnob.onValueChange      = [this] { processor.getParams().swing = (float) swingKnob.getValue(); };
@@ -197,14 +208,17 @@ GrooveForgeEditor::GrooveForgeEditor (GrooveForgeProcessor& p)
 
     for (auto* l : { &hostLabel, &statusLabel, &meterInfoLabel })
     {
-        styleLabel (*l, 12.0f);
+        l->setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 10.5f, juce::Font::plain));
+        l->setColour (juce::Label::textColourId, Colours::textDim);
+        l->setJustificationType (juce::Justification::centredLeft);
         addAndMakeVisible (*l);
     }
+    hostLabel.setJustificationType (juce::Justification::centredRight);
 
     // --- grid --------------------------------------------------------------
     grid.onStatus = [this] (juce::String s)
     {
-        statusLabel.setText (s.isEmpty() ? juce::String ("Click: add/remove  |  Drag: move (Alt = free/off-grid)  |  Shift+drag or wheel: velocity  |  Arrows: nudge  |  Ctrl+wheel: zoom")
+        statusLabel.setText (s.isEmpty() ? juce::String ("Click: add/remove  |  Drag: move (Alt = off-grid)  |  Shift+drag or wheel: velocity  |  Arrows: nudge  |  S: switch stroke  |  Ctrl+wheel: zoom")
                                          : s, juce::dontSendNotification);
     };
     grid.onStatus ({});
@@ -223,8 +237,8 @@ GrooveForgeEditor::GrooveForgeEditor (GrooveForgeProcessor& p)
     refreshControls();
 
     setResizable (true, true);
-    setResizeLimits (960, 600, 2400, 1400);
-    setSize (1280, 780);
+    setResizeLimits (1000, 700, 2400, 1600);
+    setSize (1280, 860);
     startTimerHz (10);
 }
 
@@ -317,7 +331,7 @@ void GrooveForgeEditor::timerCallback()
         host << "  |  host " << hn << "/" << hd << (bpm > 0 ? "  " + juce::String (bpm, 1) + " bpm" : juce::String());
     hostLabel.setText (host, juce::dontSendNotification);
 
-    playButton.setButtonText (playButton.getToggleState() ? "Stop" : "Play");
+    playButton.setButtonText (playButton.getToggleState() ? "STOP" : "PLAY");
 
     if (processor.followHostMeter && hn > 0 && hd > 0
         && (hn != processor.getPattern().numerator || hd != processor.getPattern().denominator)
@@ -351,96 +365,129 @@ void GrooveForgeEditor::exportMidi()
 //==============================================================================
 void GrooveForgeEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (Colours::background);
-    g.setColour (Colours::panel);
-    g.fillRect (getLocalBounds().removeFromTop (156));
-    g.setColour (juce::Colour (0xff0e1013));
-    g.drawHorizontalLine (156, 0.0f, (float) getWidth());
+    cicada::paintVenation (g, getLocalBounds());
+    cicada::paintHeader (g, headerArea, "Groove Forge", "drum patterns for any genre and meter, on or off the grid");
+
+    struct P { juce::Rectangle<int> r; const char* title; juce::Colour accent; };
+    for (auto& p : { P { genPanel, "Generator", Colours::gold }, P { meterPanel, "Meter", Colours::teal },
+                     P { feelPanel, "Feel", Colours::chlorophyll }, P { outPanel, "Edit & Export", Colours::text },
+                     P { seqPanel, "Sequencer", Colours::eye } })
+    {
+        cicada::paintMembrane (g, p.r.toFloat());
+        cicada::paintTitle (g, p.r.reduced (10, 5).removeFromTop (18), p.title, p.accent);
+    }
+
+    // recessed well behind the lane headers and grid
+    auto well = viewport.getBounds().getUnion (headerColumn.getBounds()).expanded (1);
+    g.setColour (Colours::line);
+    g.drawRoundedRectangle (well.toFloat(), 4.0f, 1.0f);
 }
 
 void GrooveForgeEditor::resized()
 {
-    auto r = getLocalBounds();
-    auto top = r.removeFromTop (156).reduced (10, 6);
+    auto r = getLocalBounds().reduced (12, 0);
 
-    // right block: export
-    auto exportArea = top.removeFromRight (250);
+    // header: emblem + wordmark painted on the left, transport on the right
+    headerArea = r.removeFromTop (44);
     {
-        auto a = exportArea;
-        auto row = a.removeFromTop (28);
-        exportButton.setBounds (row.removeFromLeft (120));
-        row.removeFromLeft (6);
-        midiOutToggle.setBounds (row);
-        a.removeFromTop (4);
-        splitToggle.setBounds (a.removeFromBottom (22));
-        dragPad.setBounds (a.reduced (0, 2));
+        auto t = headerArea.reduced (0, 9);
+        generateButton.setBounds (t.removeFromRight (110));
+        t.removeFromRight (8);
+        tempoSlider.setBounds (t.removeFromRight (110).reduced (0, 2));
+        tempoLabel.setBounds (t.removeFromRight (34));
+        t.removeFromRight (8);
+        playButton.setBounds (t.removeFromRight (70));
     }
-    top.removeFromRight (12);
 
-    auto row1 = top.removeFromTop (34);
-    title.setBounds (row1.removeFromLeft (170));
-    genreBox.setBounds (row1.removeFromLeft (190).reduced (0, 3));
-    row1.removeFromLeft (8);
-    generateButton.setBounds (row1.removeFromLeft (120).reduced (0, 2));
-    row1.removeFromLeft (8);
-    fillsToggle.setBounds (row1.removeFromLeft (64));
-    row1.removeFromLeft (8);
-    playButton.setBounds (row1.removeFromLeft (64).reduced (0, 3));
-    row1.removeFromLeft (8);
-    tempoLabel.setBounds (row1.removeFromLeft (34));
-    tempoSlider.setBounds (row1.removeFromLeft (120).reduced (0, 5));
-    row1.removeFromLeft (8);
-    hostLabel.setBounds (row1);
+    r.removeFromTop (4);
+    auto row = r.removeFromTop (132);
+    const int gap = 8;
+    const int w = row.getWidth() - 3 * gap;
+    genPanel   = row.removeFromLeft ((int) (w * 0.22f)); row.removeFromLeft (gap);
+    meterPanel = row.removeFromLeft ((int) (w * 0.30f)); row.removeFromLeft (gap);
+    feelPanel  = row.removeFromLeft ((int) (w * 0.24f)); row.removeFromLeft (gap);
+    outPanel   = row;
 
-    top.removeFromTop (4);
-    auto row2 = top.removeFromTop (30);
-    timeLabel.setBounds (row2.removeFromLeft (36));
-    numeratorBox.setBounds (row2.removeFromLeft (56).reduced (0, 2));
-    slashLabel.setBounds (row2.removeFromLeft (14));
-    denominatorBox.setBounds (row2.removeFromLeft (56).reduced (0, 2));
-    row2.removeFromLeft (10);
-    groupLabel.setBounds (row2.removeFromLeft (48));
-    groupingEditor.setBounds (row2.removeFromLeft (90).reduced (0, 2));
-    row2.removeFromLeft (10);
-    barsLabel.setBounds (row2.removeFromLeft (34));
-    barsBox.setBounds (row2.removeFromLeft (56).reduced (0, 2));
-    row2.removeFromLeft (10);
-    snapLabel.setBounds (row2.removeFromLeft (36));
-    snapBox.setBounds (row2.removeFromLeft (100).reduced (0, 2));
-    row2.removeFromLeft (10);
-    followHostToggle.setBounds (row2.removeFromLeft (150));
-    row2.removeFromLeft (6);
-    zoomLabel.setBounds (row2.removeFromLeft (40));
-    zoomSlider.setBounds (row2.removeFromLeft (120).reduced (0, 4));
+    auto content = [] (juce::Rectangle<int> p) { auto c = p.reduced (10, 6); c.removeFromTop (22); return c; };
 
-    top.removeFromTop (2);
-    auto row3 = top;
-    const int knobW = 76;
-    for (auto [k, l] : { std::pair<juce::Slider*, juce::Label*> { &complexityKnob, &complexityLabel },
-                         { &swingKnob, &swingLabel }, { &humanizeKnob, &humanizeLabel },
-                         { &variationKnob, &variationLabel }, { &volumeKnob, &volumeLabel } })
-    {
-        auto a = row3.removeFromLeft (knobW);
-        l->setBounds (a.removeFromBottom (14));
-        k->setBounds (a.reduced (12, 0));
+    {   // generator
+        auto c = content (genPanel);
+        auto l1 = c.removeFromTop (24);
+        fillsToggle.setBounds (l1.removeFromRight (70));
+        l1.removeFromRight (6);
+        genreBox.setBounds (l1);
+        c.removeFromTop (4);
+        auto k = c.removeFromLeft (76);
+        complexityLabel.setBounds (k.removeFromTop (12));
+        complexityKnob.setBounds (k);
     }
-    row3.removeFromLeft (14);
-    meterInfoLabel.setBounds (row3.removeFromTop (row3.getHeight() / 2 + 6));
+    {   // meter
+        auto c = content (meterPanel);
+        auto l1 = c.removeFromTop (24);
+        timeLabel.setBounds (l1.removeFromLeft (38));
+        numeratorBox.setBounds (l1.removeFromLeft (52));
+        slashLabel.setBounds (l1.removeFromLeft (14));
+        denominatorBox.setBounds (l1.removeFromLeft (52));
+        l1.removeFromLeft (10);
+        groupLabel.setBounds (l1.removeFromLeft (52));
+        groupingEditor.setBounds (l1.removeFromLeft (86));
+        c.removeFromTop (6);
+        auto l2 = c.removeFromTop (24);
+        barsLabel.setBounds (l2.removeFromLeft (38));
+        barsBox.setBounds (l2.removeFromLeft (52));
+        l2.removeFromLeft (14);
+        followHostToggle.setBounds (l2.removeFromLeft (130));
+        c.removeFromTop (6);
+        meterInfoLabel.setBounds (c.removeFromTop (18));
+    }
+    {   // feel
+        auto c = content (feelPanel);
+        const int kw = juce::jmin (76, c.getWidth() / 4);
+        for (auto [k, l] : { std::pair<juce::Slider*, juce::Label*> { &swingKnob, &swingLabel }, { &humanizeKnob, &humanizeLabel },
+                             { &variationKnob, &variationLabel }, { &volumeKnob, &volumeLabel } })
+        {
+            auto a = c.removeFromLeft (kw);
+            l->setBounds (a.removeFromTop (12));
+            k->setBounds (a);
+        }
+    }
+    {   // edit & export
+        auto c = content (outPanel);
+        auto l1 = c.removeFromTop (24);
+        snapLabel.setBounds (l1.removeFromLeft (38));
+        snapBox.setBounds (l1.removeFromLeft (96));
+        l1.removeFromLeft (10);
+        zoomLabel.setBounds (l1.removeFromLeft (40));
+        zoomSlider.setBounds (l1.reduced (0, 3));
+        c.removeFromTop (6);
+        auto l2 = c.removeFromTop (30);
+        exportButton.setBounds (l2.removeFromLeft (120).reduced (0, 3));
+        l2.removeFromLeft (8);
+        dragPad.setBounds (l2);
+        c.removeFromTop (4);
+        auto l3 = c.removeFromTop (22);
+        splitToggle.setBounds (l3.removeFromLeft (l3.getWidth() / 2));
+        midiOutToggle.setBounds (l3);
+    }
 
-    // body
-    auto status = r.removeFromBottom (24).reduced (10, 2);
-    statusLabel.setBounds (status);
+    // sequencer
+    r.removeFromTop (gap);
+    seqPanel = r.withTrimmedBottom (12);
+    auto c = seqPanel.reduced (10, 6);
+    auto titleRow = c.removeFromTop (22);
+    hostLabel.setBounds (titleRow.removeFromRight (titleRow.getWidth() / 2));
+    statusLabel.setBounds (c.removeFromBottom (20));
+    c.removeFromBottom (4);
 
-    auto body = r.reduced (6, 4);
-    const int laneH = juce::jmax (22, (body.getHeight() - 12) / NumLanes);
+    const int laneH = juce::jmax (20, (c.getHeight() - viewport.getScrollBarThickness()) / NumLanes);
     grid.setLaneHeight (laneH);
 
-    auto headerArea = body.removeFromLeft (300);
-    headerColumn.setBounds (headerArea.withHeight (laneH * NumLanes));
+    auto heads = c.removeFromLeft (300);
+    headerColumn.setBounds (heads.withHeight (laneH * NumLanes));
     for (int l = 0; l < NumLanes; ++l)
-        headers[(size_t) l]->setBounds (0, l * laneH, headerArea.getWidth(), laneH);
+        headers[(size_t) l]->setBounds (0, l * laneH, heads.getWidth(), laneH);
 
-    viewport.setBounds (body.withHeight (laneH * NumLanes + viewport.getScrollBarThickness()));
+    viewport.setBounds (c.withHeight (laneH * NumLanes + viewport.getScrollBarThickness()));
 
     if (autoFit)
         fitZoom();

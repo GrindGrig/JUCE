@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(GROOVE_FORGE VERSION 0.1.0)
+project(GROOVE_FORGE VERSION 0.2.0)
+
+# Windows: link the C++ runtime statically so the plug-in and app need no
+# Visual C++ Redistributable on the user's machine.
+set (CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 # Build from inside this JUCE checkout:
 #   cmake -S GrooveForge -B build-gf -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -11,6 +15,11 @@ if (NOT TARGET juce::juce_core)
     add_subdirectory ("${GF_JUCE_DIR}" "${CMAKE_BINARY_DIR}/JUCE")
 endif()
 
+# The shared Cicada look (palette, look-and-feel, painting helpers) used by all our plug-ins
+if (NOT TARGET cicada_ui)
+    juce_add_module ("${CMAKE_CURRENT_SOURCE_DIR}/../projects/shared/cicada_ui")
+endif()
+
 option (GF_BUILD_PLUGIN "Build the plugin" ON)
 if (GF_BUILD_PLUGIN)
 juce_add_plugin(GrooveForge
@@ -19,6 +28,8 @@ juce_add_plugin(GrooveForge
     PLUGIN_CODE Gfdm
     FORMATS VST3 AU Standalone
     PRODUCT_NAME "Groove Forge"
+    VST3_CATEGORIES Instrument Drum Generator
+    BUNDLE_ID com.grooveforge.grooveforge
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT TRUE
@@ -49,6 +60,7 @@ target_compile_definitions(GrooveForge
 target_link_libraries(GrooveForge
     PRIVATE
         juce::juce_audio_utils
+        cicada_ui
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags

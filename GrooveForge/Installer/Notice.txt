@@ -1,0 +1,19 @@
+Groove Forge
+============
+
+Groove Forge is a drum machine and pattern generator plug-in built with the
+JUCE framework (https://juce.com).
+
+Groove Forge is free software, distributed under the GNU Affero General Public
+License version 3 (AGPLv3), the licence under which the JUCE framework modules
+are used in this build. The full licence text follows below.
+
+Source code: @SOURCE_URL@
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. See sections
+15 and 16 of the licence below.
+
+VST is a registered trademark of Steinberg Media Technologies GmbH.
+
+--------------------------------------------------------------------------------
+

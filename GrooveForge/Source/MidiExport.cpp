@@ -46,8 +46,9 @@ juce::MidiFile MidiExport::createMidiFile (const Pattern& pattern,
             const double end   = start + juce::jmax (0.05, n.length) * ticksPerQuarter;
             const auto vel = (juce::uint8) juce::jlimit (1, 127, juce::roundToInt (n.velocity * 127.0f));
 
-            auto on  = juce::MidiMessage::noteOn  (drumChannel, lane.midiNote, vel);
-            auto off = juce::MidiMessage::noteOff (drumChannel, lane.midiNote);
+            const int key = midiNoteFor (lane, n);
+            auto on  = juce::MidiMessage::noteOn  (drumChannel, key, vel);
+            auto off = juce::MidiMessage::noteOff (drumChannel, key);
             on.setTimeStamp (std::round (start));
             off.setTimeStamp (std::round (end));
 

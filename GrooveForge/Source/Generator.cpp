@@ -5,13 +5,14 @@ namespace gf
 
 namespace
 {
-enum class FillStyle { None, Toms, SnareRoll, HatRoll };
+enum class FillStyle { None, Toms, SnareRoll, HatRoll, Hand };
 
 struct GenreTraits
 {
     GenreInfo info;
     FillStyle fill;
     bool crashAtStart;
+    int lead = -1;     // lead hand drum, for genres built around one
 };
 
 const GenreTraits& traits (Genre g)
@@ -34,6 +35,10 @@ const GenreTraits& traits (Genre g)
         { { "Dubstep",        140.0, 0.50f, false }, FillStyle::Toms,      true  },
         { { "Reggaeton",       95.0, 0.50f, false }, FillStyle::SnareRoll, false },
         { { "UK Garage",      132.0, 0.62f, false }, FillStyle::SnareRoll, false },
+        { { "Celtic / Folk",  112.0, 0.50f, false }, FillStyle::Hand,      false, Bodhran },
+        { { "Middle Eastern", 100.0, 0.50f, false }, FillStyle::Hand,      false, Darbuka },
+        { { "West African",   120.0, 0.50f, false }, FillStyle::Hand,      false, Djembe },
+        { { "Cajon Unplugged", 96.0, 0.55f, false }, FillStyle::Hand,      false, Cajon },
     };
     return t[juce::jlimit (0, (int) Genre::NumGenres - 1, (int) g)];
 }
@@ -55,6 +60,7 @@ struct Hit
     float vel;
     double len = 1.0;    // in steps
     bool onGrid = true;  // swing only applies to on-grid hits
+    bool alt = false;    // second stroke
 };
 
 //==============================================================================
@@ -73,12 +79,12 @@ struct BarCtx
     float vary (float v, float amt = 0.06f) { return juce::jlimit (0.05f, 1.0f, v + (rng.nextFloat() * 2.0f - 1.0f) * amt); }
     int bars() const                     { return m.stepsPerBar; }
 
-    void add (double step, float vel, double len = 1.0, bool grid = true)
+    void add (double step, float vel, double len = 1.0, bool grid = true, bool alt = false)
     {
         if (step < 0.0 || step >= m.stepsPerBar) return;
         for (auto& h : hits)
-            if (std::abs (h.step - step) < 0.01) { h.vel = juce::jmax (h.vel, vel); return; }
-        hits.push_back ({ step, juce::jlimit (0.05f, 1.0f, vel), len, grid });
+            if (std::abs (h.step - step) < 0.01 && h.alt == alt) { h.vel = juce::jmax (h.vel, vel); return; }
+        hits.push_back ({ step, juce::jlimit (0.05f, 1.0f, vel), len, grid, alt });
     }
 
     void removeRange (double from, double to)
@@ -618,6 +624,195 @@ void ukGarage (int lane, BarCtx& c)
     }
 }
 
+//==============================================================================
+// Genres built around the hand drums. These functions only write the kit lanes;
+// the hand drums themselves come from handDrum() below.
+void firstOfGroups (BarCtx& c, float vel)
+{
+    for (int t = 0; t < c.m.numTactus(); ++t)
+        if (c.m.isFirstTactusOfSuperGroup (t))
+            c.add (c.m.tactusStart[(size_t) t], c.vary (vel));
+}
+
+void celtic (int lane, BarCtx& c)
+{
+    switch (lane)
+    {
+        case Kick: if (c.cx > 0.55f) firstOfGroups (c, 0.6f); break;
+        case Perc: if (c.cx > 0.45f) c.eighths (0.45f, 0.35f); break;
+        case Clap: if (c.cx > 0.8f) c.onBackbeats (0.55f); break;
+        default: break;
+    }
+}
+
+void middleEastern (int lane, BarCtx& c)
+{
+    switch (lane)
+    {
+        case Kick: if (c.cx > 0.7f) firstOfGroups (c, 0.55f); break;
+        case Perc: c.sixteenths (0.45f, 0.38f, 0.28f, 0.4f + c.cx * 0.5f); break;   // riq-like jingles
+        case Clap: if (c.cx > 0.6f) c.onBackbeats (0.7f); break;
+        case Rim:  if (c.cx > 0.75f) c.euclidean (c.density (3.0f / 16.0f), 2, 0.4f, 0.45f); break;
+        default: break;
+    }
+}
+
+void westAfrican (int lane, BarCtx& c)
+{
+    switch (lane)
+    {
+        case Perc:
+            c.eighths (0.5f, 0.4f);
+            if (c.cx > 0.5f)
+                for (auto& s : c.m.steps) if (s.posInTactus % 2 == 1 && c.chance (0.3f)) c.add (s.index, c.vary (0.3f));
+            break;
+        case Kick: if (c.cx > 0.8f) c.onTactus (0.5f); break;
+        default: break;
+    }
+}
+
+void cajonUnplugged (int lane, BarCtx& c)
+{
+    switch (lane)
+    {
+        case Perc: c.sixteenths (0.5f, 0.42f, 0.3f, 0.6f + c.cx * 0.4f); break;
+        case Clap: if (c.cx > 0.7f) c.onBackbeats (0.6f); break;
+        case Ride: if (c.cx > 0.85f) c.eighths (0.4f, 0.3f); break;
+        default: break;
+    }
+}
+
+//==============================================================================
+/** Lowest Complexity at which a genre uses a hand drum (0 = always), or < 0 if it never does. */
+float handGate (Genre g, int lane)
+{
+    struct Gate { Genre genre; int lane; float from; };
+    static const Gate gates[] =
+    {
+        { Genre::House, Djembe, 0.45f },        { Genre::House, Darbuka, 0.7f },
+        { Genre::Techno, Darbuka, 0.6f },
+        { Genre::HipHop, Djembe, 0.7f },        { Genre::HipHop, Cajon, 0.75f },
+        { Genre::DrumAndBass, Darbuka, 0.75f },
+        { Genre::Breakbeat, Djembe, 0.6f },
+        { Genre::Rock, Cajon, 0.6f },           { Genre::Rock, Bodhran, 0.75f },
+        { Genre::Funk, Cajon, 0.5f },           { Genre::Funk, Djembe, 0.7f },
+        { Genre::Reggae, Djembe, 0.35f },       { Genre::Reggae, Dundun, 0.7f },
+        { Genre::Afrobeat, Djembe, 0.0f },      { Genre::Afrobeat, Dundun, 0.0f },     { Genre::Afrobeat, Darbuka, 0.7f },
+        { Genre::Latin, Cajon, 0.3f },          { Genre::Latin, Djembe, 0.6f },
+        { Genre::Jazz, Cajon, 0.75f },
+        { Genre::Dubstep, Darbuka, 0.5f },
+        { Genre::Reggaeton, Darbuka, 0.5f },    { Genre::Reggaeton, Cajon, 0.7f },
+        { Genre::UKGarage, Darbuka, 0.6f },
+        { Genre::Celtic, Bodhran, 0.0f },       { Genre::Celtic, Cajon, 0.6f },
+        { Genre::MiddleEastern, Darbuka, 0.0f }, { Genre::MiddleEastern, Bodhran, 0.35f }, { Genre::MiddleEastern, Djembe, 0.75f },
+        { Genre::WestAfrican, Djembe, 0.0f },   { Genre::WestAfrican, Dundun, 0.0f },
+        { Genre::CajonUnplugged, Cajon, 0.0f }, { Genre::CajonUnplugged, Djembe, 0.55f }, { Genre::CajonUnplugged, Darbuka, 0.75f },
+    };
+    for (auto& gt : gates)
+        if (gt.genre == g && gt.lane == lane)
+            return gt.from;
+    return -1.0f;
+}
+
+/** Meter-aware parts for the hand drums. `lead` = the genre is built around this drum. */
+void handDrum (int lane, BarCtx& c, bool lead)
+{
+    auto& m = c.m;
+    const float cx = c.cx, d = lead ? 1.0f : 0.55f;
+
+    switch (lane)
+    {
+        case Darbuka:   // doum on accent-group starts, tek on the other beats, teks and ornaments between
+            for (int t = 0; t < m.numTactus(); ++t)
+            {
+                const int st = m.tactusStart[(size_t) t], len = m.tactusLen[(size_t) t];
+                if (m.isFirstTactusOfSuperGroup (t)) c.add (st, c.vary (0.95f, 0.03f));
+                else                                 c.add (st, c.vary (0.8f), 1.0, true, true);
+                for (int p = 1; p < len; ++p)
+                {
+                    if (p % 2 == 0) { if (c.chance ((0.45f + cx * 0.4f) * d)) c.add (st + p, c.vary (0.62f), 1.0, true, true); }
+                    else if (c.chance (cx * 0.35f * d)) c.add (st + p, c.vary (0.35f), 1.0, true, true);
+                }
+            }
+            if (lead && cx > 0.6f && c.chance (0.5f) && m.numTactus() > 1)
+            {
+                const int st = m.tactusStart.back();     // tremolo in 32nds into the last beat
+                c.removeRange (st - 2, st);
+                for (int i = 0; i < 4; ++i) c.add (st - 2 + i * 0.5, 0.3f + 0.12f * (float) i, 0.5, false, true);
+            }
+            break;
+
+        case Djembe:    // tone on the beat, slap on the offbeat, pickups between
+            for (int t = 0; t < m.numTactus(); ++t)
+            {
+                const int st = m.tactusStart[(size_t) t], len = m.tactusLen[(size_t) t];
+                if (lead || m.isFirstTactusOfSuperGroup (t)) c.add (st, c.vary (t == 0 ? 0.85f : 0.7f));
+                for (auto p : BarCtx::offbeatPositions (len)) c.add (st + p, c.vary (0.92f), 1.0, true, true);
+                for (int p = 1; p < len; p += 2)
+                    if (c.chance ((0.15f + cx * 0.4f) * d)) c.add (st + p, c.vary (0.55f), 1.0, true, p == len - 1);
+            }
+            break;
+
+        case Cajon:     // bass like a kick, slap on the backbeats, ghost slaps
+        {
+            auto backs = m.backbeatSteps;
+            if (backs.empty()) backs.push_back (m.halfTimeStep);
+            auto isBack = [&] (int s) { return std::find (backs.begin(), backs.end(), s) != backs.end(); };
+            firstOfGroups (c, 0.95f);
+            for (auto& s : m.steps)
+                if (! s.tactusStart && s.posInTactus % 2 == 0 && ! isBack (s.index) && c.chance ((0.12f + cx * 0.3f) * d))
+                    c.add (s.index, c.vary (0.8f));
+            for (auto b : backs) c.add (b, c.vary (0.95f, 0.03f), 1.0, true, true);
+            for (auto& s : m.steps)
+                if (s.posInTactus % 2 == 1 && ! c.has (s.index) && c.chance ((0.15f + cx * 0.4f) * d))
+                    c.add (s.index, c.vary (0.3f), 1.0, true, true);
+            break;
+        }
+
+        case Bodhran:   // continuous eighths: open stroke on the beat, top strokes between, triplet rolls
+            for (auto& s : m.steps)
+            {
+                if (s.posInTactus % 2 != 0) { if (c.chance (cx * 0.2f * d)) c.add (s.index, c.vary (0.35f), 1.0, true, true); continue; }
+                if (s.tactusStart)                        c.add (s.index, c.vary (s.superStart ? 0.95f : 0.82f));
+                else if (c.chance (lead ? 0.95f : 0.5f)) c.add (s.index, c.vary (0.55f), 1.0, true, true);
+            }
+            if (lead)
+            {
+                const int rolls = (cx > 0.3f ? 1 : 0) + (int) (cx * 3.0f * c.rng.nextFloat());
+                for (int r = 0; r < rolls; ++r)
+                {
+                    const int e = 2 * c.rng.nextInt (juce::jmax (1, m.stepsPerBar / 2));
+                    if (e >= m.stepsPerBar || m.steps[(size_t) e].tactusStart) continue;
+                    c.removeRange (e, e + 2);
+                    for (int k = 0; k < 3; ++k)     // triplet roll, off the straight grid
+                        c.add (e + k * 2.0 / 3.0, 0.45f + 0.1f * (float) k, 0.5, false, k < 2);
+                }
+            }
+            break;
+
+        case Dundun:    // bell timeline (Euclidean on the 8ths: 5 in 8, 7 in 12) plus the drum on accent groups
+        {
+            const int n8 = m.stepsPerBar / 2, k = juce::jmax (2, juce::roundToInt (n8 * 7.0 / 12.0));
+            if (lead || cx > 0.5f)
+            {
+                auto e = euclid (k, n8, 0);
+                for (int i = 0; i < n8; ++i)
+                    if (e[(size_t) i]) c.add (i * 2, c.vary (i == 0 ? 0.8f : 0.6f), 1.0, true, true);
+            }
+            for (size_t g = 0; g < m.superGroupSizes.size(); ++g)
+            {
+                const int st = m.tactusStart[(size_t) m.superGroupFirstTactus[g]];
+                c.add (st, c.vary (0.95f, 0.03f));
+                const int next = g + 1 < m.superGroupSizes.size() ? m.tactusStart[(size_t) m.superGroupFirstTactus[g + 1]] : m.stepsPerBar;
+                if (c.chance ((0.35f + cx * 0.3f) * d)) c.add (next - (next - st > 4 ? 3 : 1), c.vary (0.8f));
+            }
+            break;
+        }
+
+        default: break;
+    }
+}
+
 void generateLaneBar (Genre g, int lane, BarCtx& c)
 {
     switch (g)
@@ -638,14 +833,18 @@ void generateLaneBar (Genre g, int lane, BarCtx& c)
         case Genre::Dubstep:     dubstep (lane, c); break;
         case Genre::Reggaeton:   reggaeton (lane, c); break;
         case Genre::UKGarage:    ukGarage (lane, c); break;
+        case Genre::Celtic:         celtic (lane, c); break;
+        case Genre::MiddleEastern:  middleEastern (lane, c); break;
+        case Genre::WestAfrican:    westAfrican (lane, c); break;
+        case Genre::CajonUnplugged: cajonUnplugged (lane, c); break;
         case Genre::NumGenres:   break;
     }
 }
 
 //==============================================================================
-struct FillHit { int lane; double step; float vel; };
+struct FillHit { int lane; double step; float vel; bool alt = false; };
 
-std::vector<FillHit> makeFill (FillStyle style, const Meter& m, float cx, int seed, double& regionStart)
+std::vector<FillHit> makeFill (FillStyle style, const Meter& m, float cx, int seed, double& regionStart, int lead)
 {
     juce::Random rng ((juce::int64) seed * 92821 + 17);
     int startTactus = m.numTactus() - 1;
@@ -691,16 +890,29 @@ std::vector<FillHit> makeFill (FillStyle style, const Meter& m, float cx, int se
                 out.push_back ({ ClosedHat, start + i * 0.5, 0.35f + 0.6f * (float) i / (float) n });
             break;
         }
+        case FillStyle::Hand:   // the lead hand drum plays the fill, alternating strokes
+            if (lead < 0) break;
+            for (int s = start; s < m.stepsPerBar; ++s)
+            {
+                const float frac = (float) (s - start) / (float) len;
+                const bool last = s == m.stepsPerBar - 1, odd = (s - start) % 2 == 1;
+                if (odd && cx < 0.35f && ! last) continue;
+                out.push_back ({ lead, (double) s, 0.45f + 0.5f * frac, odd && ! last });
+                if (cx > 0.65f && frac > 0.5f && ! last)
+                    out.push_back ({ lead, s + 0.5, 0.35f + 0.4f * frac, true });
+            }
+            break;
         case FillStyle::None: break;
     }
 
     return out;
 }
 
-bool laneAffectedByFill (FillStyle style, int lane)
+bool laneAffectedByFill (FillStyle style, int lane, int lead)
 {
     switch (style)
     {
+        case FillStyle::Hand:      return lane == lead;
         case FillStyle::Toms:      return lane == Snare || lane == HighTom || lane == MidTom || lane == LowTom
                                        || lane == ClosedHat || lane == OpenHat || lane == Ride || lane == Clap;
         case FillStyle::SnareRoll: return lane == Snare || lane == Clap;
@@ -799,7 +1011,16 @@ void Generator::generate (Pattern& pattern, const GeneratorParams& p,
             ctx.bar = b;
             ctx.numBars = pattern.bars;
 
-            generateLaneBar (p.genre, lane, ctx);
+            if (isHandDrum (lane))
+            {
+                const float gate = handGate (p.genre, lane);
+                if (p.force || (gate >= 0.0f && p.complexity >= gate))
+                    handDrum (lane, ctx, tr.lead == lane || juce::exactlyEqual (gate, 0.0f));
+            }
+            else
+            {
+                generateLaneBar (p.genre, lane, ctx);
+            }
 
             if (lane == Crash && b == 0 && tr.crashAtStart)
                 ctx.add (0, 0.85f, 4.0);
@@ -807,13 +1028,13 @@ void Generator::generate (Pattern& pattern, const GeneratorParams& p,
             if (hasFill && b == pattern.bars - 1)
             {
                 double regionStart = 0;
-                auto fill = makeFill (tr.fill, meter, p.complexity, p.seed + b, regionStart);
-                if (laneAffectedByFill (tr.fill, lane))
+                auto fill = makeFill (tr.fill, meter, p.complexity, p.seed + b, regionStart, tr.lead);
+                if (laneAffectedByFill (tr.fill, lane, tr.lead))
                 {
                     ctx.removeRange (regionStart, meter.stepsPerBar);
                     for (auto& f : fill)
                         if (f.lane == lane)
-                            ctx.add (f.step, f.vel, 1.0, std::abs (f.step - std::round (f.step)) < 0.001);
+                            ctx.add (f.step, f.vel, 1.0, std::abs (f.step - std::round (f.step)) < 0.001, f.alt);
                 }
             }
 
@@ -838,6 +1059,7 @@ void Generator::generate (Pattern& pattern, const GeneratorParams& p,
                 n.beat = juce::jmax (0.0, b * barBeats + step * stepBeats);
                 n.length = h.len * stepBeats;
                 n.velocity = vel;
+                n.alt = h.alt;
                 pattern.notes.push_back (n);
             }
         }
